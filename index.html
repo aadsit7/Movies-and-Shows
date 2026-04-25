@@ -2604,7 +2604,7 @@ function renderGrid(tab) {
 ════════════════════════════════════════════════════════════ */
 function renderCard(raw, tab, idx) {
   const n  = norm(raw);
-  const title       = pick(n, 'title');
+  const title       = pick(n, 'title', 'favorite_team_or_channel', 'channel');
   const year        = pick(n, 'year_started', 'year');
   const genre       = pick(n, 'genre_primary', 'genre');
   const rating      = pick(n, 'age_rating', 'rating');
@@ -2705,7 +2705,7 @@ function openDetailSheet(tab, idx) {
   if (!raw) return;
 
   const n         = norm(raw);
-  const title     = pick(n, 'title') || 'Untitled';
+  const title     = pick(n, 'title', 'favorite_team_or_channel', 'channel') || 'Untitled';
   const year      = pick(n, 'year_started', 'year');
   const genre     = pick(n, 'genre_primary', 'genre');
   const rating    = pick(n, 'age_rating', 'rating');
@@ -2806,7 +2806,7 @@ async function refreshCard(btn) {
   const raw      = src[idx];
   if (!raw) return;
 
-  const title = pick(norm(raw), 'title') || 'this title';
+  const title = pick(norm(raw), 'title', 'favorite_team_or_channel', 'channel') || 'this title';
 
   const overlay = document.createElement('div');
   overlay.className = 'update-overlay';
@@ -3374,7 +3374,7 @@ async function updateAll() {
 
   for (const { item, tab, idx } of queue) {
     done++;
-    const title  = pick(norm(item), 'title') || '?';
+    const title  = pick(norm(item), 'title', 'favorite_team_or_channel', 'channel') || '?';
     const rowIdx = parseInt(pick(norm(item), 'rowindex', 'row') || '0', 10);
     paintUpdateProgress(`${done} / ${total} · ${title}`, { disabled: true, updating: true });
 
