@@ -9,18 +9,35 @@
 var CONTENT_MASTER  = 'Content_Master';
 var LIVE_TV_SHEET   = 'Live_TV_Channels';
 
-/* Anthropic API key — set this before deploying */
+/* Anthropic API key — set in Apps Script Project Settings → Script Properties.
+   Property name: ANTHROPIC_API_KEY
+   The literal below is a fallback for local testing only; leave it empty in
+   the deployed copy. */
 var ANTHROPIC_API_KEY = '';
-var ANTHROPIC_MODEL   = 'claude-sonnet-4-6';
+var ANTHROPIC_MODEL   = 'claude-opus-4-7';
 
-/* Fields projected for each content type */
+function getAnthropicKey() {
+  var fromProps = '';
+  try {
+    fromProps = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY') || '';
+  } catch (_) {}
+  return fromProps || ANTHROPIC_API_KEY || '';
+}
+
+/* Fields projected for each content type. Optional columns
+   (streaming_on, imdb_score, etc.) are surfaced if the sheet has them; if
+   not, projectFields just emits an empty string for that key. */
 var CONTENT_FIELDS = [
   'title', 'content_type', 'genre_primary', 'age_rating',
-  'description', 'year_started', 'seasons_count', 'tone', 'family_safe'
+  'description', 'year_started', 'seasons_count', 'tone', 'family_safe',
+  'streaming_on', 'imdb_score', 'cast', 'director',
+  'network', 'status', 'latest_episode', 'next_airs'
 ];
 var LIVE_TV_FIELDS = [
   'favorite_team_or_channel', 'live_tv_type', 'league',
-  'default_channel_or_provider', 'profile_name'
+  'default_channel_or_provider', 'profile_name',
+  'network', 'genre', 'description', 'streaming_on',
+  'next_game', 'tv_channel'
 ];
 
 /* ── Routing ─────────────────────────────────────────────── */
@@ -98,22 +115,73 @@ function handleAddRow(sheetName, rowData) {
   if (isLiveTVSheet(sheetName)) {
     var sheet = ss.getSheetByName(LIVE_TV_SHEET);
     if (!sheet) return { error: LIVE_TV_SHEET + ' sheet not found' };
-    appendByHeaders(sheet, rowData);
+    appendByHeaders(sheet, mapToSheetRow(rowData, 'liveTV'));
 
   } else {
     /* Movies and Shows both go into Content_Master */
     var sheet = ss.getSheetByName(CONTENT_MASTER);
     if (!sheet) return { error: CONTENT_MASTER + ' sheet not found' };
 
-    /* Ensure content_type is set from the caller's sheetName if absent */
-    if (!rowData['content_type']) {
-      rowData = shallowCopy(rowData);
-      rowData['content_type'] = isShowsSheet(sheetName) ? 'TV Show' : 'Movie';
-    }
-    appendByHeaders(sheet, rowData);
+    var kind = isShowsSheet(sheetName) ? 'TV Show' : 'Movie';
+    appendByHeaders(sheet, mapToSheetRow(rowData, kind));
   }
 
   return { success: true };
+}
+
+/* ── Map Claude's output keys → sheet header keys ────────── */
+/* appendByHeaders only writes columns whose headers exist on the sheet, so
+   any keys returned here that the sheet doesn't have are silently dropped.
+   That means you can add columns like streaming_on, imdb_score, cast,
+   director, network, status, latest_episode, next_airs to Content_Master
+   and they will start populating without any code change. */
+function mapToSheetRow(data, kind) {
+  data = data || {};
+  if (kind === 'liveTV') {
+    return {
+      favorite_team_or_channel:   firstOf(data, ['favorite_team_or_channel', 'channel', 'title']),
+      live_tv_type:               firstOf(data, ['live_tv_type']),
+      league:                     firstOf(data, ['league']),
+      default_channel_or_provider: firstOf(data, ['default_channel_or_provider', 'streamingOn', 'tvChannel', 'network']),
+      profile_name:               firstOf(data, ['profile_name']),
+      /* optional richer columns */
+      network:       firstOf(data, ['network']),
+      genre:         firstOf(data, ['genre']),
+      description:   firstOf(data, ['description']),
+      streaming_on:  firstOf(data, ['streamingOn', 'streaming_on']),
+      next_game:     firstOf(data, ['nextGame', 'next_game']),
+      tv_channel:    firstOf(data, ['tvChannel', 'tv_channel'])
+    };
+  }
+
+  return {
+    title:          firstOf(data, ['title']),
+    content_type:   kind === 'TV Show' ? 'TV Show' : 'Movie',
+    genre_primary:  firstOf(data, ['genre_primary', 'genre']),
+    age_rating:     firstOf(data, ['age_rating', 'rating']),
+    description:    firstOf(data, ['description']),
+    year_started:   firstOf(data, ['year_started', 'year']),
+    seasons_count:  firstOf(data, ['seasons_count', 'seasons']),
+    tone:           firstOf(data, ['tone']),
+    family_safe:    firstOf(data, ['family_safe']),
+    /* optional richer columns */
+    streaming_on:   firstOf(data, ['streamingOn', 'streaming_on']),
+    imdb_score:     firstOf(data, ['imdbScore', 'imdb_score', 'imdb']),
+    cast:           firstOf(data, ['cast']),
+    director:       firstOf(data, ['director']),
+    network:        firstOf(data, ['network']),
+    status:         firstOf(data, ['status']),
+    latest_episode: firstOf(data, ['latestEpisode', 'latest_episode']),
+    next_airs:      firstOf(data, ['nextAirs', 'next_airs', 'nextAiring'])
+  };
+}
+
+function firstOf(obj, keys) {
+  for (var i = 0; i < keys.length; i++) {
+    var v = obj[keys[i]];
+    if (v !== undefined && v !== null && v !== '') return v;
+  }
+  return '';
 }
 
 /* ── Update row ──────────────────────────────────────────── */
@@ -132,46 +200,107 @@ function handleUpdateRow(sheetName, rowIndex, rowData) {
   return { success: true };
 }
 
-/* ── Claude search ───────────────────────────────────────── */
+/* ── Claude search (with web_search tool) ────────────────── */
 function handleClaudeSearch(query, sheetName) {
-  var prompt = 'You are a media database assistant. The user searched for: "' + query + '"\n\n' +
-    'Return ONLY valid JSON, no markdown, no explanation.\n\n' +
+  var apiKey = getAnthropicKey();
+  if (!apiKey) {
+    return { error: 'Missing ANTHROPIC_API_KEY — set it in Apps Script → Project Settings → Script Properties' };
+  }
+
+  var prompt =
+    'You are a media database assistant. The user searched for: "' + query + '"\n\n' +
+    'Use the web_search tool to look up current, accurate information from credible sources ' +
+    '(IMDb, Rotten Tomatoes, Wikipedia, official network and streaming-service pages). ' +
+    'Then return ONLY a single JSON object, no markdown, no explanation, no prose around it.\n\n' +
     'For a Movie use:\n' +
     '{"type":"Movie","title":"","year":"","genre":"","rating":"","description":"","director":"","cast":"","streamingOn":"","imdbScore":""}\n\n' +
     'For a TV Show use:\n' +
-    '{"type":"Show","title":"","year":"","genre":"","rating":"","description":"","network":"","seasons":"","latestEpisode":"","status":"","cast":"","streamingOn":"","imdbScore":""}\n\n' +
+    '{"type":"Show","title":"","year":"","genre":"","rating":"","description":"","network":"","seasons":"","latestEpisode":"","status":"","nextAirs":"","cast":"","streamingOn":"","imdbScore":""}\n\n' +
     'For Live TV or Sports use:\n' +
     '{"type":"LiveTV","channel":"","network":"","league":"","genre":"","description":"","streamingOn":"","nextGame":"","tvChannel":""}\n\n' +
     'Be accurate. Real data only. JSON only.';
 
-  var response = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
-    method: 'post',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01'
-    },
-    payload: JSON.stringify({
-      model: 'claude-opus-4-5',
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: prompt }]
-    }),
-    muteHttpExceptions: true
-  });
+  var payload = {
+    model:      ANTHROPIC_MODEL,
+    max_tokens: 2048,
+    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
+    messages: [{ role: 'user', content: prompt }]
+  };
 
-  var result = JSON.parse(response.getContentText());
-  var text = result.content && result.content[0] ? result.content[0].text : '{}';
-
+  var response;
   try {
-    var mediaData = JSON.parse(text);
-    if (sheetName) handleAddRow(sheetName, mediaData);
-    return { success: true, data: mediaData };
-  } catch(e) {
-    return { error: 'Could not parse response', raw: text };
+    response = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+      method:      'post',
+      contentType: 'application/json',
+      headers: {
+        'x-api-key':         apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      payload:            JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+  } catch (netErr) {
+    return { error: 'Network error contacting Anthropic: ' + netErr.message };
   }
+
+  var code = response.getResponseCode();
+  var body = response.getContentText();
+  if (code < 200 || code >= 300) {
+    var apiErr;
+    try { apiErr = JSON.parse(body); } catch (_) {}
+    var msg = (apiErr && apiErr.error && apiErr.error.message) || body;
+    return { error: 'Anthropic API ' + code + ': ' + msg };
+  }
+
+  var result;
+  try { result = JSON.parse(body); }
+  catch (e) { return { error: 'Bad API response: ' + body.substring(0, 200) }; }
+
+  var text = extractTextFromContent(result.content);
+  if (!text) return { error: 'Empty response from Claude' };
+
+  var mediaData = parseJsonFromText(text);
+  if (!mediaData) {
+    return { error: 'Could not parse JSON from response', raw: text.substring(0, 400) };
+  }
+
+  if (sheetName) {
+    try { handleAddRow(sheetName, mediaData); } catch (writeErr) { /* don't fail search on write */ }
+  }
+
+  return { success: true, data: mediaData };
+}
+
+/* Pull the concatenated text out of an Anthropic content array. With the
+   web_search tool, content can include server_tool_use and
+   web_search_tool_result blocks; we only want the model's final text. */
+function extractTextFromContent(content) {
+  if (!Array.isArray(content)) return '';
+  var out = '';
+  for (var i = 0; i < content.length; i++) {
+    var block = content[i];
+    if (block && block.type === 'text' && block.text) out += block.text;
+  }
+  return out;
+}
+
+/* Extract the outermost JSON object from a possibly-fenced text blob. */
+function parseJsonFromText(text) {
+  if (!text) return null;
+  var stripped = String(text).replace(/```json\s*/gi, '').replace(/```/g, '').trim();
+  var start = stripped.indexOf('{');
+  var end   = stripped.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  try { return JSON.parse(stripped.substring(start, end + 1)); }
+  catch (_) { return null; }
 }
 
 function claudeEnrichSearch(query, sheetName) {
+  var apiKey = getAnthropicKey();
+  if (!apiKey) {
+    return { error: 'Missing ANTHROPIC_API_KEY — set it in Apps Script → Project Settings → Script Properties' };
+  }
+
   var contentKind  = inferContentKind(sheetName);
   var systemPrompt = buildClaudeSystemPrompt(contentKind);
 
@@ -188,7 +317,7 @@ function claudeEnrichSearch(query, sheetName) {
     method:             'post',
     contentType:        'application/json',
     headers: {
-      'x-api-key':         ANTHROPIC_API_KEY,
+      'x-api-key':         apiKey,
       'anthropic-version': '2023-06-01'
     },
     payload:            JSON.stringify(payload),
