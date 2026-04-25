@@ -115,23 +115,30 @@ function fetchAllMediaFromSheet() {
   if (contentSheet) ensureColumns(contentSheet, CONTENT_FIELDS);
   if (liveSheet)    ensureColumns(liveSheet,    LIVE_TV_FIELDS);
 
-  /* Content_Master → split by content_type, dedup by title */
+  /* Content_Master → split by content_type, dedup by (content_type + title)
+     so a Movie and a TV Show with the same title are kept as separate entries. */
   if (contentSheet) {
     var rawData = contentSheet.getDataRange().getValues();
     if (rawData.length > 1) {
-      var headers     = normalizeHeaders(rawData[0]);
-      var seenContent = {};
+      var headers    = normalizeHeaders(rawData[0]);
+      var seenMovies = {};
+      var seenShows  = {};
       for (var i = 1; i < rawData.length; i++) {
         var row = buildObj(headers, rawData[i]);
         var key = String(row['title'] || '').toLowerCase().trim();
         if (!key) continue;            // skip blank rows
-        if (seenContent[key]) continue; // skip duplicates
-        seenContent[key] = true;
         var item = projectFields(row, CONTENT_FIELDS);
         item.rowIndex = i + 1;
         var ct = String(row['content_type'] || '').trim();
-        if (ct === 'Movie')        movies.push(item);
-        else if (ct === 'TV Show') shows.push(item);
+        if (ct === 'Movie') {
+          if (seenMovies[key]) continue;
+          seenMovies[key] = true;
+          movies.push(item);
+        } else if (ct === 'TV Show') {
+          if (seenShows[key]) continue;
+          seenShows[key] = true;
+          shows.push(item);
+        }
       }
     }
   }
@@ -201,7 +208,7 @@ function handleAddRow(sheetName, rowData) {
     var kind       = isShowsSheet(sheetName) ? 'TV Show' : 'Movie';
     var contentRow = mapToSheetRow(rowData, kind);
     var titleVal   = (contentRow.title || '').toLowerCase().trim();
-    if (titleVal && hasDuplicate(sheet, 'title', titleVal)) {
+    if (titleVal && hasDuplicate(sheet, 'title', titleVal, kind)) {
       return { success: true, duplicate: true };
     }
     appendByHeaders(sheet, contentRow);
@@ -212,15 +219,20 @@ function handleAddRow(sheetName, rowData) {
 }
 
 /* Returns true if the sheet already has a row whose titleHeader column
-   matches newTitle (case-insensitive). */
-function hasDuplicate(sheet, titleHeader, newTitle) {
+   matches newTitle (case-insensitive). When contentType is provided, also
+   requires the content_type column to match — so a Movie and a TV Show with
+   the same title are not considered duplicates of each other. */
+function hasDuplicate(sheet, titleHeader, newTitle, contentType) {
   var data = sheet.getDataRange().getValues();
   if (data.length <= 1) return false;
   var headers  = normalizeHeaders(data[0]);
   var titleIdx = headers.indexOf(titleHeader);
   if (titleIdx === -1) return false;
+  var ctIdx = contentType ? headers.indexOf('content_type') : -1;
   for (var i = 1; i < data.length; i++) {
-    if (String(data[i][titleIdx]).toLowerCase().trim() === newTitle) return true;
+    if (String(data[i][titleIdx]).toLowerCase().trim() !== newTitle) continue;
+    if (ctIdx !== -1 && String(data[i][ctIdx]).trim() !== contentType) continue;
+    return true;
   }
   return false;
 }
@@ -251,12 +263,19 @@ function removeDuplicatesFromSheet(sheetName) {
   var keyIdx  = headers.indexOf(keyCol);
   if (keyIdx === -1) return { error: 'Key column not found: ' + keyCol };
 
+  /* For Content_Master, include content_type in the key so a Movie and a TV
+     Show with identical titles are treated as separate entries, not duplicates. */
+  var ctIdx = !isLiveTVSheet(sheetName) ? headers.indexOf('content_type') : -1;
+
   var seen         = {};
   var rowsToDelete = [];
 
   for (var i = 1; i < data.length; i++) {
-    var key = String(data[i][keyIdx]).toLowerCase().trim();
-    if (!key) continue;
+    var title = String(data[i][keyIdx]).toLowerCase().trim();
+    if (!title) continue;
+    var key = ctIdx !== -1
+      ? String(data[i][ctIdx]).trim().toLowerCase() + ':' + title
+      : title;
     if (seen[key]) {
       rowsToDelete.push(i + 1); // 1-based sheet row number
     } else {
