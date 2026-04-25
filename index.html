@@ -460,8 +460,49 @@
     .sheet-header {
       padding: 12px 18px 0;
       flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
     }
-    .sheet-title { font-size: 19px; font-weight: 700; }
+    .sheet-title { font-size: 19px; font-weight: 700; flex: 1; min-width: 0; }
+    .sheet-close {
+      width: 36px; height: 36px;
+      flex-shrink: 0;
+      background: #252540;
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      color: var(--text-2);
+      font-size: 18px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 0;
+    }
+    .sheet-close:active { background: #333; color: var(--text); }
+
+    /* Prominent airing / next-game block */
+    .airing-block {
+      background: linear-gradient(135deg, rgba(0,191,255,.12), rgba(0,191,255,.04));
+      border: 1px solid rgba(0,191,255,.35);
+      border-radius: 12px;
+      padding: 10px 12px;
+      margin: 10px 0 4px;
+    }
+    .airing-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      color: var(--accent);
+      margin-bottom: 3px;
+    }
+    .airing-value { font-size: 14px; color: #fff; font-weight: 500; }
+    .airing-empty { font-size: 12px; color: var(--text-2); font-style: italic; }
+
+    .media-card { cursor: pointer; }
     .sheet-body {
       padding: 14px 18px;
       padding-bottom: calc(20px + var(--safe-bottom));
@@ -671,6 +712,19 @@
     <div class="sheet-title" id="sheet-title">Quick Add</div>
   </div>
   <div class="sheet-body" id="sheet-body"></div>
+</div>
+
+<!-- Detail sheet scrim -->
+<div class="sheet-scrim" id="detail-scrim" onclick="closeDetailSheet()"></div>
+
+<!-- Detail bottom sheet -->
+<div class="bottom-sheet" id="detail-sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <div class="sheet-title" id="detail-title">Details</div>
+    <button class="sheet-close" onclick="closeDetailSheet()" aria-label="Close">✕</button>
+  </div>
+  <div class="sheet-body" id="detail-body"></div>
 </div>
 
 <!-- Toast container -->
@@ -1098,11 +1152,12 @@ function renderCard(raw, tab, idx) {
   }
 
   if (tab === 'shows') {
-    const seasons = pick(n, 'seasons_count', 'seasons', 'season', 'numseasons');
-    const latest  = pick(n, 'latestepisode', 'latestep', 'episode', 'latestepisodename');
-    const status  = pick(n, 'status');
-    const network = pick(n, 'network');
-    const cast    = pick(n, 'cast');
+    const seasons  = pick(n, 'seasons_count', 'seasons', 'season', 'numseasons');
+    const latest   = pick(n, 'latestepisode', 'latestep', 'episode', 'latestepisodename');
+    const status   = pick(n, 'status');
+    const network  = pick(n, 'network');
+    const cast     = pick(n, 'cast');
+    const nextAirs = pick(n, 'nextairs', 'nextairing', 'airing', 'airs', 'whenitairs');
 
     if (seasons || status) {
       extraHtml += `<div class="badges-row" style="margin-top:6px">`;
@@ -1117,6 +1172,13 @@ function renderCard(raw, tab, idx) {
           <div class="ep-value">${esc(latest)}</div>
         </div>`;
     }
+    extraHtml += `
+      <div class="airing-block">
+        <div class="airing-label">When does it air?</div>
+        ${nextAirs
+          ? `<div class="airing-value">${esc(nextAirs)}</div>`
+          : `<div class="airing-empty">Tap 🔄 to check</div>`}
+      </div>`;
     if (network) extraHtml += `<div class="info-line">📡 <span>${esc(network)}</span></div>`;
     if (cast)    extraHtml += `<div class="info-line">👥 <span>${esc(cast)}</span></div>`;
   }
@@ -1126,14 +1188,23 @@ function renderCard(raw, tab, idx) {
     const type     = pick(n, 'live_tv_type');
     const league   = pick(n, 'league');
     const provider = pick(n, 'default_channel_or_provider');
+    const nextAirs = pick(n, 'nextairs', 'nextairing', 'nextgame', 'airing', 'airs', 'whenitairs');
     if (channel)  extraHtml += `<div class="info-line">📺 <span>${esc(channel)}</span></div>`;
     if (type)     extraHtml += `<div class="info-line">📡 <span>${esc(type)}</span></div>`;
     if (league)   extraHtml += `<div class="info-line">🏆 <span>${esc(league)}</span></div>`;
     if (provider) extraHtml += `<div class="info-line">🎛️ <span>${esc(provider)}</span></div>`;
+    extraHtml += `
+      <div class="airing-block">
+        <div class="airing-label">When does it air?</div>
+        ${nextAirs
+          ? `<div class="airing-value">${esc(nextAirs)}</div>`
+          : `<div class="airing-empty">Tap 🔄 to check</div>`}
+      </div>`;
   }
 
   return `
-    <div class="media-card" data-tab="${tab}" data-idx="${idx}" data-row="${esc(rowIndex)}">
+    <div class="media-card" data-tab="${tab}" data-idx="${idx}" data-row="${esc(rowIndex)}"
+         onclick="openDetailSheet('${tab}', ${idx})">
       <div class="card-title">${esc(title)}</div>
       <div class="card-meta">
         ${year  ? `<span class="meta-year">${esc(year)}</span>` : ''}
@@ -1142,9 +1213,107 @@ function renderCard(raw, tab, idx) {
       </div>
       ${badgesHtml ? `<div class="badges-row">${badgesHtml}</div>` : ''}
       ${extraHtml}
-      ${desc ? `<p class="card-desc" onclick="this.classList.toggle('expanded')">${esc(desc)}</p>` : ''}
-      <button class="refresh-btn" onclick="refreshCard(this)" title="Refresh from Claude">🔄</button>
+      ${desc ? `<p class="card-desc">${esc(desc)}</p>` : ''}
+      <button class="refresh-btn" onclick="event.stopPropagation(); refreshCard(this)" title="Refresh from Claude">🔄</button>
     </div>`;
+}
+
+/* ════════════════════════════════════════════════════════════
+   DETAIL BOTTOM SHEET
+════════════════════════════════════════════════════════════ */
+function openDetailSheet(tab, idx) {
+  const src = tab === 'movies' ? S.movies : tab === 'shows' ? S.shows : S.livetv;
+  const raw = src[idx];
+  if (!raw) return;
+
+  const n         = norm(raw);
+  const title     = pick(n, 'title') || 'Untitled';
+  const year      = pick(n, 'year_started', 'year');
+  const genre     = pick(n, 'genre_primary', 'genre');
+  const rating    = pick(n, 'age_rating', 'rating');
+  const imdb      = pick(n, 'imdbscore', 'imdb', 'imdb_score');
+  const desc      = pick(n, 'description', 'desc');
+  const streaming = pick(n, 'streamingon', 'streaming', 'streamingplatform');
+  const ps        = platformStyle(streaming);
+
+  let badgesHtml = '';
+  if (streaming) badgesHtml += `<span class="platform-badge" style="background:${ps.bg};color:${ps.fg};${ps.border ? 'border:' + ps.border : ''}">${esc(streaming)}</span>`;
+  if (rating)    badgesHtml += `<span class="rating-badge">${esc(rating)}</span>`;
+  if (imdb)      badgesHtml += `<span class="imdb-badge">⭐ ${esc(imdb)}</span>`;
+
+  let extraHtml = '';
+
+  if (tab === 'movies') {
+    const director = pick(n, 'director');
+    const cast     = pick(n, 'cast');
+    if (director) extraHtml += `<div class="info-line">🎥 <span><strong>Director:</strong> ${esc(director)}</span></div>`;
+    if (cast)     extraHtml += `<div class="info-line">👥 <span><strong>Cast:</strong> ${esc(cast)}</span></div>`;
+  } else if (tab === 'shows') {
+    const seasons  = pick(n, 'seasons_count', 'seasons', 'season', 'numseasons');
+    const latest   = pick(n, 'latestepisode', 'latestep', 'episode', 'latestepisodename');
+    const status   = pick(n, 'status');
+    const network  = pick(n, 'network');
+    const cast     = pick(n, 'cast');
+    const nextAirs = pick(n, 'nextairs', 'nextairing', 'airing', 'airs', 'whenitairs');
+    if (latest)  extraHtml += `<div class="ep-block"><div class="ep-label">Latest Episode</div><div class="ep-value">${esc(latest)}</div></div>`;
+    if (status)  extraHtml += `<div class="info-line">📊 <span><strong>Status:</strong> ${esc(status)}</span></div>`;
+    if (seasons) extraHtml += `<div class="info-line">📅 <span><strong>Seasons:</strong> ${esc(seasons)}</span></div>`;
+    if (network) extraHtml += `<div class="info-line">📡 <span><strong>Network:</strong> ${esc(network)}</span></div>`;
+    if (cast)    extraHtml += `<div class="info-line">👥 <span><strong>Cast:</strong> ${esc(cast)}</span></div>`;
+    extraHtml += `
+      <div class="airing-block">
+        <div class="airing-label">When does it air?</div>
+        ${nextAirs
+          ? `<div class="airing-value">${esc(nextAirs)}</div>`
+          : `<div class="airing-empty">Tap 🔄 on the card to check</div>`}
+      </div>`;
+  } else {
+    const channel   = pick(n, 'favorite_team_or_channel', 'channel');
+    const network   = pick(n, 'network');
+    const league    = pick(n, 'league');
+    const tvChannel = pick(n, 'tvchannel');
+    const provider  = pick(n, 'default_channel_or_provider');
+    const nextGame  = pick(n, 'nextgame', 'next_game', 'nextairs', 'nextairing', 'airing');
+    if (channel)   extraHtml += `<div class="info-line">📺 <span><strong>Channel:</strong> ${esc(channel)}</span></div>`;
+    if (network)   extraHtml += `<div class="info-line">📡 <span><strong>Network:</strong> ${esc(network)}</span></div>`;
+    if (league)    extraHtml += `<div class="info-line">🏆 <span><strong>League:</strong> ${esc(league)}</span></div>`;
+    if (tvChannel) extraHtml += `<div class="info-line">📡 <span><strong>TV Channel:</strong> ${esc(tvChannel)}</span></div>`;
+    if (provider)  extraHtml += `<div class="info-line">🎛️ <span><strong>Provider:</strong> ${esc(provider)}</span></div>`;
+    extraHtml += `
+      <div class="airing-block">
+        <div class="airing-label">${nextGame ? 'Next Game / When does it air?' : 'When does it air?'}</div>
+        ${nextGame
+          ? `<div class="airing-value">${esc(nextGame)}</div>`
+          : `<div class="airing-empty">Tap 🔄 on the card to check</div>`}
+      </div>`;
+  }
+
+  const trailerUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(title + ' trailer')}`;
+
+  const body = `
+    <div class="card-meta" style="margin-bottom:10px">
+      ${year  ? `<span class="meta-year">${esc(year)}</span>` : ''}
+      ${year && genre ? `<span class="meta-dot">·</span>` : ''}
+      ${genre ? `<span class="meta-genre">${esc(genre)}</span>` : ''}
+    </div>
+    ${badgesHtml ? `<div class="badges-row" style="margin-bottom:12px">${badgesHtml}</div>` : ''}
+    ${streaming ? `<div class="info-line" style="margin-bottom:6px">🎞️ <span><strong>Streaming on:</strong> ${esc(streaming)}</span></div>` : ''}
+    ${desc ? `<p style="font-size:14px;color:#ccc;line-height:1.55;margin:10px 0 14px">${esc(desc)}</p>` : ''}
+    ${extraHtml}
+    <a href="${esc(trailerUrl)}" target="_blank" rel="noopener noreferrer"
+       class="btn btn-primary btn-full" style="margin-top:18px;text-decoration:none">
+      ▶️ Watch Trailer on YouTube
+    </a>`;
+
+  document.getElementById('detail-title').textContent = title;
+  document.getElementById('detail-body').innerHTML = body;
+  document.getElementById('detail-scrim').classList.add('open');
+  document.getElementById('detail-sheet').classList.add('open');
+}
+
+function closeDetailSheet() {
+  document.getElementById('detail-scrim').classList.remove('open');
+  document.getElementById('detail-sheet').classList.remove('open');
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -1161,7 +1330,6 @@ async function refreshCard(btn) {
 
   const title = pick(norm(raw), 'title') || 'this title';
 
-  // overlay + spin
   const overlay = document.createElement('div');
   overlay.className = 'update-overlay';
   overlay.innerHTML = `<div class="spinner spinner-sm"></div><span>Updating…</span>`;
@@ -1169,19 +1337,40 @@ async function refreshCard(btn) {
   btn.classList.add('spinning');
 
   try {
-    let query = `REFRESH: ${title} — get latest season, latest episode title and number, current streaming platform as of 2026, updated IMDB score`;
-    if (tab === 'shows') {
-      query += '. Return JSON with fields: type, title, year, genre, rating, description, network, seasons, latestEpisode, status, cast, streamingOn, imdbScore';
+    let query = `REFRESH: ${title} get latest episode, season, streaming platform, IMDB score as of 2026`;
+    if (tab === 'shows' || tab === 'livetv') {
+      query += `. When does ${title} next air? What channel and time? Include the answer in a "nextAirs" field.`;
     }
 
-    const parsed = await claudeSearch(query, sheetName(tab));
-    if (!parsed) throw new Error('no result');
+    let response;
+    try {
+      response = await fetch(APPS_SCRIPT_URL, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ action: 'claudeSearch', query }),
+      });
+    } catch (netErr) {
+      throw new Error('Network unreachable');
+    }
+
+    if (!response.ok) throw new Error('Server responded ' + response.status);
+
+    const result = await response.json().catch(() => null);
+    if (!result) throw new Error('Invalid server response');
+    if (result.error) throw new Error(result.error);
+
+    const parsed = parseMediaResult(result);
+    if (!parsed) throw new Error('Could not parse refresh data');
 
     // merge into state
     src[idx] = { ...raw, ...parsed };
 
-    // write back to sheet
-    await updateRow(tab, rowIndex, src[idx]);
+    // best-effort write-back to sheet (don't fail the refresh on this)
+    try {
+      await updateRow(tab, rowIndex, src[idx]);
+    } catch (writeErr) {
+      console.warn('updateRow failed during refresh:', writeErr);
+    }
 
     // replace card in DOM
     const newHtml  = renderCard(src[idx], tab, idx);
@@ -1196,7 +1385,7 @@ async function refreshCard(btn) {
     console.error('refreshCard:', err);
     overlay.remove();
     btn.classList.remove('spinning');
-    toast('Update failed — try again', 'error');
+    toast('Refresh failed - check connection', 'error');
   }
 }
 
