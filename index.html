@@ -344,6 +344,44 @@
     }
 
     /* ── Weekly Schedule ─────────────────────────────────── */
+    /* ── "Up Next" hero card ─────────────────────────────── */
+    .next-up-hero {
+      background: linear-gradient(135deg, rgba(0,191,255,.15), rgba(0,191,255,.05));
+      border: 1.5px solid rgba(0,191,255,.35);
+      border-radius: 16px;
+      padding: 14px 16px;
+      margin-bottom: 20px;
+      cursor: pointer;
+      transition: opacity .15s;
+    }
+    .next-up-hero:active { opacity: .8; }
+    .next-up-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: var(--accent);
+      margin-bottom: 5px;
+    }
+    .next-up-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 8px;
+      line-height: 1.2;
+    }
+    .next-up-meta {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .next-up-when {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--accent);
+    }
+
     .schedule-day-section { margin-bottom: 22px; }
     .schedule-day-header {
       display: flex;
@@ -1135,6 +1173,39 @@ let searchIndex  = [];  // [{raw, tab, idx, titleLc, airsDate, haystack}]
 let _indexDirty  = true;
 let _filterTimer = null;
 
+/* ── Local-storage cache (instant display on re-open) ───── */
+const LS_CACHE_KEY = 'fmtCache_v2';
+const LS_SYNC_KEY  = 'fmtLastSync_v2';   // timestamp of last auto-schedule-sync
+
+function saveCache() {
+  try {
+    localStorage.setItem(LS_CACHE_KEY, JSON.stringify({
+      movies: S.movies,
+      shows:  S.shows,
+      livetv: S.livetv,
+      at:     Date.now()
+    }));
+  } catch (_) {}
+}
+
+function restoreCache() {
+  try {
+    const raw = localStorage.getItem(LS_CACHE_KEY);
+    if (!raw) return false;
+    const d = JSON.parse(raw);
+    if (!d || !Array.isArray(d.shows)) return false;
+    S.movies     = d.movies || [];
+    S.shows      = d.shows  || [];
+    S.livetv     = d.livetv || [];
+    S.lastSynced = d.at ? new Date(d.at) : null;
+    S.connStatus = 'ok';
+    _indexDirty  = true;
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 /* ════════════════════════════════════════════════════════════
    UTILITY HELPERS
 ════════════════════════════════════════════════════════════ */
@@ -1660,6 +1731,7 @@ function loadAllData() {
       S.livetv = data.liveTV || [];
       S.lastSynced = new Date();
       S.connStatus = 'ok';
+      saveCache();
       renderLibrary();
       renderScheduleTab();
     })
@@ -1721,6 +1793,7 @@ async function loadTabData(tab) {
     S.livetv     = data.liveTV || [];
     S.lastSynced = new Date();
     S.connStatus = 'ok';
+    saveCache();
     if (tab === 'schedule') renderScheduleTab();
     else renderLibrary();
   } catch (err) {
@@ -1865,6 +1938,44 @@ function renderUpcomingRail(tab) {
 /* ════════════════════════════════════════════════════════════
    WEEKLY SCHEDULE
 ════════════════════════════════════════════════════════════ */
+
+/* Hero card for the single next upcoming item. Returns '' if nothing is coming up. */
+function renderNextUpHero(days) {
+  for (let i = 0; i < 30; i++) {
+    const items = days[i];
+    if (!items || !items.length) continue;
+    const { raw, idx, text, date, tab } = items[0];
+    const n       = norm(raw);
+    const title   = pick(n, 'title', 'favorite_team_or_channel', 'channel') || 'Untitled';
+    const network = tab === 'shows'
+      ? pick(n, 'streamingon', 'streaming', 'network')
+      : pick(n, 'tvchannel', 'default_channel_or_provider', 'streamingon', 'network');
+    const ps     = platformStyle(network);
+    const league = tab === 'livetv' ? pick(n, 'league') : '';
+    const rel    = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : (relativeWhen(date) || '');
+
+    let timeStr = '';
+    if (date) {
+      const h = date.getHours(), m = date.getMinutes();
+      if (h > 0 || m > 0) {
+        const ampm = h >= 12 ? 'pm' : 'am';
+        timeStr = `${h % 12 || 12}${m > 0 ? ':' + String(m).padStart(2, '0') : ''}${ampm}`;
+      }
+    }
+
+    return `
+      <div class="next-up-hero" onclick="openDetailSheet('${tab}', ${idx})">
+        <div class="next-up-label">Up Next</div>
+        <div class="next-up-title">${esc(title)}</div>
+        <div class="next-up-meta">
+          <span class="next-up-when">${esc(rel)}${timeStr ? ' · ' + timeStr : ''}</span>
+          ${network ? `<span class="upcoming-platform" style="background:${ps.bg};color:${ps.fg};${ps.border ? 'border:' + ps.border : ''}">${esc(network)}</span>` : ''}
+          ${league  ? `<span class="upcoming-league">${esc(league)}</span>` : ''}
+        </div>
+      </div>`;
+  }
+  return '';
+}
 
 /* Returns true when a show is still actively producing new episodes. */
 function isActiveShow(raw) {
@@ -2012,6 +2123,8 @@ function renderScheduleTab() {
   }
 
   let html = '';
+  // "Up Next" hero — the single soonest upcoming item, shown at the top when not filtering
+  if (!query) html += renderNextUpHero(days);
   // Iterate all 30 days; nearest date sections appear first automatically.
   for (let i = 0; i < 30; i++) {
     const allItems = days[i];
@@ -3000,6 +3113,7 @@ async function silentReload() {
     S.lastSynced = new Date();
     S.connStatus = 'ok';
     _indexDirty = true;
+    saveCache();
     renderLibrary();
     renderScheduleTab();
   } catch (err) {
@@ -3050,22 +3164,104 @@ async function deduplicateAll(silent = false) {
 }
 
 /* ════════════════════════════════════════════════════════════
+   AUTO-SYNC MISSING SCHEDULES
+   Silently fetches next_airs / next_game from Claude for any
+   active shows or live TV entries that have those fields empty,
+   then writes the result back to the Google Sheet so future
+   loads pick up the date without any manual refresh.
+   Runs at most once every 6 hours (guarded by localStorage)
+   and caps at 3 items per session to stay within quota.
+════════════════════════════════════════════════════════════ */
+async function autoSyncMissingSchedules() {
+  // Throttle: skip if we already ran within the last 6 hours.
+  try {
+    const last = parseInt(localStorage.getItem(LS_SYNC_KEY) || '0', 10);
+    if (Date.now() - last < 6 * 3600 * 1000) return;
+  } catch (_) {}
+
+  const needsSync = [];
+
+  S.shows.forEach((raw, idx) => {
+    if (!isActiveShow(raw)) return;
+    const n      = norm(raw);
+    const next   = pick(n, 'nextairs', 'nextairing', 'airing', 'airs', 'whenitairs');
+    const rowIdx = parseInt(pick(n, 'rowindex', 'row') || '0', 10);
+    if (!next && rowIdx) needsSync.push({ item: raw, tab: 'shows', idx, rowIdx });
+  });
+
+  S.livetv.forEach((raw, idx) => {
+    const n      = norm(raw);
+    const next   = pick(n, 'nextgame', 'next_game', 'nextairs', 'nextairing');
+    const rowIdx = parseInt(pick(n, 'rowindex', 'row') || '0', 10);
+    if (!next && rowIdx) needsSync.push({ item: raw, tab: 'livetv', idx, rowIdx });
+  });
+
+  // Record timestamp now so repeated fast opens don't re-queue while syncing.
+  try { localStorage.setItem(LS_SYNC_KEY, String(Date.now())); } catch (_) {}
+
+  if (!needsSync.length) return;
+
+  // Only process 3 items per session to avoid hammering the API quota.
+  const toSync = needsSync.slice(0, 3);
+  let updated  = 0;
+
+  for (const { item, tab, idx, rowIdx } of toSync) {
+    const n     = norm(item);
+    const title = pick(n, 'title', 'favorite_team_or_channel', 'channel');
+    if (!title) continue;
+
+    try {
+      const query = tab === 'shows'
+        ? `When does "${title}" next air? Return JSON with type, title, nextAirs, status, latestEpisode, network, streamingOn`
+        : `When is the next game for "${title}"? Return JSON with type, channel, nextGame, tvChannel, network, league`;
+
+      const parsed = await claudeSearch(query);
+      if (parsed) {
+        const src = tab === 'shows' ? S.shows : S.livetv;
+        src[idx] = { ...item, ...parsed, rowIndex: item.rowIndex };
+        await updateRow(tab, rowIdx, parsed);
+        updated++;
+      }
+    } catch (_) {}
+
+    // Brief pause to respect Apps Script rate limits.
+    await new Promise(r => setTimeout(r, 700));
+  }
+
+  if (updated > 0) {
+    _indexDirty = true;
+    saveCache();
+    renderScheduleTab();
+    renderLibrary();
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
    INIT
 ════════════════════════════════════════════════════════════ */
 (function init() {
-  // Schedule is the default landing tab
   S.tab = 'schedule';
   renderSubHeader('schedule');
-  // Show loading spinner immediately while data fetches
-  const schedBody = document.getElementById('schedule-body');
-  if (schedBody) schedBody.innerHTML = `
-    <div class="empty-state">
-      <div class="big-icon" style="animation:spin 1s linear infinite;display:inline-block">↻</div>
-      <p>Loading schedule…</p>
-    </div>`;
-  // After data loads, silently sweep both sheets for duplicates so the
-  // guide is always clean without requiring manual action.
-  loadAllData().then(() => deduplicateAll(true)).catch(() => {});
+
+  // Restore last-known data from localStorage so the schedule is visible instantly.
+  const hasCached = restoreCache();
+  if (hasCached) {
+    renderScheduleTab();
+  } else {
+    const schedBody = document.getElementById('schedule-body');
+    if (schedBody) schedBody.innerHTML = `
+      <div class="empty-state">
+        <div class="big-icon" style="animation:spin 1s linear infinite;display:inline-block">↻</div>
+        <p>Loading schedule…</p>
+      </div>`;
+  }
+
+  // Always fetch fresh data from the Google Sheet, then dedup and auto-fill
+  // any missing next_airs / next_game fields by asking Claude.
+  loadAllData()
+    .then(() => deduplicateAll(true))
+    .then(() => autoSyncMissingSchedules())
+    .catch(() => {});
 })();
 </script>
 </body>
