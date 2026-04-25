@@ -410,23 +410,30 @@ function handleClaudeSearch(query, sheetName) {
     return { error: 'Missing ANTHROPIC_API_KEY — set it in Apps Script → Project Settings → Script Properties' };
   }
 
+  var today = new Date();
+  var yyyy  = today.getFullYear();
+  var mm    = String(today.getMonth() + 1).padStart(2, '0');
+  var dd    = String(today.getDate()).padStart(2, '0');
+  var todayStr = yyyy + '-' + mm + '-' + dd;
+
   var prompt =
-    'You are a media database assistant. The user searched for: "' + query + '"\n\n' +
-    'Use the web_search tool to look up current, accurate information from credible sources ' +
-    '(IMDb, Rotten Tomatoes, Wikipedia, official network and streaming-service pages). ' +
-    'Then return ONLY a single JSON object, no markdown, no explanation, no prose around it.\n\n' +
-    'For a Movie use:\n' +
-    '{"type":"Movie","title":"","year":"","genre":"","rating":"","description":"","director":"","cast":"","streamingOn":"","imdbScore":""}\n\n' +
-    'For a TV Show use:\n' +
-    '{"type":"Show","title":"","year":"","genre":"","rating":"","description":"","network":"","seasons":"","latestEpisode":"","status":"","nextAirs":"","cast":"","streamingOn":"","imdbScore":""}\n\n' +
-    'For Live TV or Sports use:\n' +
-    '{"type":"LiveTV","channel":"","network":"","league":"","genre":"","description":"","streamingOn":"","nextGame":"","tvChannel":""}\n\n' +
-    'Be accurate. Real data only. JSON only.';
+    'You are a media database assistant. Today\'s date is ' + todayStr + '. The user searched for: "' + query + '"\n\n' +
+    'Use the web_search tool (up to 8 times) to look up current, accurate information from ' +
+    'credible sources (IMDb, Rotten Tomatoes, Wikipedia, official network and streaming-service pages, ' +
+    'TV Guide, Sports Reference). Search specifically for the next air date / next game if applicable.\n\n' +
+    'Return ONLY a single raw JSON object — no markdown fences, no explanation, no extra text.\n\n' +
+    'For a Movie use exactly these keys:\n' +
+    '{"type":"Movie","title":"","year":"<4-digit year>","genre":"<primary genre>","rating":"<MPAA rating e.g. PG-13>","description":"<1-2 sentence plot summary>","director":"","cast":"<comma-separated top 3 actors>","streamingOn":"<platform name>","imdbScore":"<e.g. 8.2>","tone":"<e.g. Action, Comedy, Drama, Thriller>"}\n\n' +
+    'For a TV Show use exactly these keys:\n' +
+    '{"type":"Show","title":"","year":"<year show started>","genre":"<primary genre>","rating":"<TV rating e.g. TV-MA>","description":"<1-2 sentence premise>","network":"<broadcast network or streaming service>","seasons":"<number>","latestEpisode":"<S##E## Title if known>","status":"<Returning | Ended | Cancelled | On Hiatus>","nextAirs":"<YYYY-MM-DD HH:MM TZ or descriptive e.g. \'Tuesdays 9PM ET on NBC\'>","cast":"<comma-separated top 3 actors>","streamingOn":"<streaming platform if different from network>","imdbScore":"<e.g. 8.2>","tone":"<e.g. Drama, Comedy, Thriller>"}\n\n' +
+    'For Live TV / Sports channel use exactly these keys:\n' +
+    '{"type":"LiveTV","channel":"<channel or team name>","network":"<broadcast network>","league":"<e.g. NFL, NBA, EPL>","genre":"<Sports | News | Entertainment>","description":"<brief description>","streamingOn":"<streaming platform>","nextGame":"<YYYY-MM-DD HH:MM TZ or descriptive>","tvChannel":"<cable/satellite channel name>"}\n\n' +
+    'Rules: real data only; leave a field empty string if truly unknown; dates MUST be in YYYY-MM-DD format when an exact date is known.';
 
   var payload = {
     model:      ANTHROPIC_MODEL,
     max_tokens: 2048,
-    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
+    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 8 }],
     messages: [{ role: 'user', content: prompt }]
   };
 

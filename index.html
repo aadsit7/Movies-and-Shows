@@ -1130,6 +1130,11 @@ const S = {
   sheetPreview:   null, // result object currently shown in sheet/settings
 };
 
+/* ── Search index (rebuilt on data change, reused on every keystroke) ── */
+let searchIndex  = [];  // [{raw, tab, idx, titleLc, airsDate, haystack}]
+let _indexDirty  = true;
+let _filterTimer = null;
+
 /* ════════════════════════════════════════════════════════════
    UTILITY HELPERS
 ════════════════════════════════════════════════════════════ */
@@ -1160,6 +1165,45 @@ function pick(n, ...keys) {
     if (val != null && val !== '') return String(val);
   }
   return '';
+}
+
+/* ── Search index helpers ──────────────────────────────────── */
+function buildEntry(raw, tab, idx) {
+  const n     = norm(raw);
+  const title = pick(n, 'title', 'favorite_team_or_channel', 'channel');
+  const airsText = tab === 'shows'
+    ? pick(n, 'nextairs', 'nextairing', 'airing', 'airs', 'whenitairs')
+    : tab === 'livetv'
+    ? pick(n, 'nextgame', 'nextairs', 'nextairing', 'airing')
+    : '';
+  return {
+    raw, tab, idx,
+    titleLc:  title.toLowerCase(),
+    airsDate: parseAiringDate(airsText),
+    haystack: [
+      title,
+      pick(n, 'genre_primary', 'genre'),
+      pick(n, 'streamingon', 'streaming'),
+      pick(n, 'favorite_team_or_channel', 'network'),
+      pick(n, 'league'),
+      pick(n, 'live_tv_type'),
+      pick(n, 'cast'),
+      pick(n, 'director'),
+      pick(n, 'description', 'desc'),
+      pick(n, 'yearstarted', 'year'),
+      pick(n, 'status'),
+      pick(n, 'agerating', 'rating'),
+      pick(n, 'tone'),
+    ].join(' ').toLowerCase(),
+  };
+}
+
+function buildSearchIndex() {
+  searchIndex = [];
+  S.shows.forEach((raw, i)  => searchIndex.push(buildEntry(raw, 'shows',  i)));
+  S.livetv.forEach((raw, i) => searchIndex.push(buildEntry(raw, 'livetv', i)));
+  S.movies.forEach((raw, i) => searchIndex.push(buildEntry(raw, 'movies', i)));
+  _indexDirty = false;
 }
 
 /* Attempt to extract a JSON object from a string (Claude sometimes wraps it) */
@@ -1466,8 +1510,11 @@ function renderSubHeader(tab) {
 
 function onFilter(tab, val) {
   S.filter[tab] = val;
-  if (tab === 'schedule') renderScheduleTab();
-  else if (tab === 'shows') renderLibrary();
+  clearTimeout(_filterTimer);
+  _filterTimer = setTimeout(() => {
+    if (tab === 'schedule') renderScheduleTab();
+    else if (tab === 'shows') renderLibrary();
+  }, 150);
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -1520,51 +1567,40 @@ function renderUpcomingLibrary() {
    LIBRARY GRID — combined movies + shows + live TV
 ════════════════════════════════════════════════════════════ */
 function renderLibrary() {
-  const query = (S.filter.shows || '').toLowerCase().trim();
-  const type  = S.libraryType;
-  const cutoff = Date.now() - 36 * 3600 * 1000;
+  if (_indexDirty) buildSearchIndex();
 
-  let allItems = [];
-  if (type === 'all' || type === 'shows') {
-    S.shows.forEach((raw, idx) => allItems.push({ raw, tab: 'shows', idx }));
-  }
-  if (type === 'all' || type === 'livetv') {
-    S.livetv.forEach((raw, idx) => allItems.push({ raw, tab: 'livetv', idx }));
-  }
-  if (type === 'all' || type === 'movies') {
-    S.movies.forEach((raw, idx) => allItems.push({ raw, tab: 'movies', idx }));
-  }
+  const rawQuery = (S.filter.shows || '').trim();
+  const words    = rawQuery.toLowerCase().split(/\s+/).filter(Boolean);
+  const type     = S.libraryType;
+  const cutoff   = Date.now() - 36 * 3600 * 1000;
 
-  if (query) {
-    allItems = allItems.filter(({ raw }) => {
-      const n = norm(raw);
-      return [
-        pick(n, 'title'),
-        pick(n, 'genre_primary', 'genre'),
-        pick(n, 'streamingon', 'streaming'),
-        pick(n, 'favorite_team_or_channel', 'network'),
-        pick(n, 'league'),
-        pick(n, 'live_tv_type'),
-        pick(n, 'cast'),
-        pick(n, 'director'),
-      ].join(' ').toLowerCase().includes(query);
+  // Filter by type chip
+  let entries = type === 'all'
+    ? searchIndex.slice()
+    : searchIndex.filter(e => e.tab === type);
+
+  if (words.length) {
+    // Multi-word AND: every word must appear somewhere in the haystack
+    entries = entries.filter(e => words.every(w => e.haystack.includes(w)));
+
+    // Rank: exact title match first, then all words in title, then others
+    entries.sort((a, b) => {
+      const aExact = a.titleLc === rawQuery.toLowerCase();
+      const bExact = b.titleLc === rawQuery.toLowerCase();
+      if (aExact !== bExact) return aExact ? -1 : 1;
+      const aTitle = words.every(w => a.titleLc.includes(w));
+      const bTitle = words.every(w => b.titleLc.includes(w));
+      if (aTitle !== bTitle) return aTitle ? -1 : 1;
+      return 0;
     });
   } else {
-    // Sort shows and live TV by upcoming air date; movies stay at end
-    allItems.sort((a, b) => {
+    // No query: shows/livetv with upcoming dates first, sorted by date; movies after
+    entries.sort((a, b) => {
       if (a.tab === 'movies' && b.tab !== 'movies') return 1;
       if (a.tab !== 'movies' && b.tab === 'movies') return -1;
-      const na = norm(a.raw), nb = norm(b.raw);
-      const sa = a.tab === 'shows'
-        ? pick(na, 'nextairs', 'nextairing', 'airing', 'airs', 'whenitairs')
-        : pick(na, 'nextgame', 'next_game', 'nextairs', 'nextairing');
-      const sb = b.tab === 'shows'
-        ? pick(nb, 'nextairs', 'nextairing', 'airing', 'airs', 'whenitairs')
-        : pick(nb, 'nextgame', 'next_game', 'nextairs', 'nextairing');
-      const da = parseAiringDate(sa), db = parseAiringDate(sb);
-      const af = da && da.getTime() > cutoff;
-      const bf = db && db.getTime() > cutoff;
-      if (af && bf) return da - db;
+      const af = a.airsDate && a.airsDate.getTime() > cutoff;
+      const bf = b.airsDate && b.airsDate.getTime() > cutoff;
+      if (af && bf) return a.airsDate - b.airsDate;
       if (af) return -1;
       if (bf) return 1;
       return 0;
@@ -1573,10 +1609,9 @@ function renderLibrary() {
 
   // Deduplicate by title
   const seen = {};
-  allItems = allItems.filter(({ raw }) => {
-    const key = (pick(norm(raw), 'title', 'favorite_team_or_channel') || '').toLowerCase().trim();
-    if (!key || seen[key]) return false;
-    seen[key] = true;
+  entries = entries.filter(e => {
+    if (!e.titleLc || seen[e.titleLc]) return false;
+    seen[e.titleLc] = true;
     return true;
   });
 
@@ -1585,18 +1620,18 @@ function renderLibrary() {
   const grid = document.getElementById('grid-library');
   if (!grid) return;
 
-  if (!allItems.length) {
+  if (!entries.length) {
     grid.innerHTML = `
       <div class="empty-state">
         <div class="big-icon">🎬</div>
-        <p>${query
-          ? `No results for &ldquo;${esc(query)}&rdquo;`
+        <p>${rawQuery
+          ? `No results for &ldquo;${esc(rawQuery)}&rdquo;`
           : 'Nothing here yet — tap <strong>+</strong> to add!'}</p>
       </div>`;
     return;
   }
 
-  grid.innerHTML = allItems.map(({ raw, tab, idx }) => renderCard(raw, tab, idx)).join('');
+  grid.innerHTML = entries.map(({ raw, tab, idx }) => renderCard(raw, tab, idx)).join('');
   grid.querySelectorAll('.media-card').forEach((card, i) => {
     card.style.animationDelay = (i * 0.045) + 's';
   });
@@ -1644,17 +1679,20 @@ function loadAllData() {
 
 function renderMovies(items) {
   S.movies = items;
+  _indexDirty = true;
   renderLibrary();
 }
 
 function renderShows(items) {
   S.shows = items;
+  _indexDirty = true;
   renderLibrary();
   renderScheduleTab();
 }
 
 function renderLiveTV(items) {
   S.livetv = items;
+  _indexDirty = true;
   renderLibrary();
   renderScheduleTab();
 }
@@ -1958,16 +1996,19 @@ function renderScheduleTab() {
   const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const MON_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+  const scheduleWords = query ? query.split(/\s+/).filter(Boolean) : [];
   function scheduleMatchesQuery(entry) {
-    if (!query) return true;
+    if (!scheduleWords.length) return true;
     const n = norm(entry.raw);
     const haystack = [
       pick(n, 'title', 'favorite_team_or_channel', 'channel'),
       pick(n, 'streamingon', 'streaming', 'network'),
       pick(n, 'league'),
       pick(n, 'genre_primary', 'genre'),
+      pick(n, 'cast'),
+      pick(n, 'description', 'desc'),
     ].join(' ').toLowerCase();
-    return haystack.includes(query);
+    return scheduleWords.every(w => haystack.includes(w));
   }
 
   let html = '';
@@ -2362,6 +2403,7 @@ async function refreshCard(btn) {
 
     // merge into state (preserve rowIndex from raw since Claude won't return it)
     src[idx] = { ...raw, ...parsed, rowIndex: raw.rowIndex };
+    _indexDirty = true;
 
     // write Claude's fresh data to sheet; pass parsed (not the merged object) so
     // mapToSheetRow on the backend sees only Claude's keys and falls back to the
@@ -2423,6 +2465,7 @@ async function deleteItem(btn) {
     if (result.error) throw new Error(result.error);
 
     src.splice(idx, 1);
+    _indexDirty = true;
     renderLibrary();
     toast(`"${title}" removed`, 'success');
   } catch (err) {
@@ -2505,6 +2548,7 @@ async function confirmAdd(source) {
     if (tab === 'movies')      S.movies.push(parsed);
     else if (tab === 'shows')  S.shows.push(parsed);
     else                       S.livetv.push(parsed);
+    _indexDirty = true;
     renderLibrary();
     // show the new item in the schedule straight away (it may have nextAirs)
     renderScheduleTab();
@@ -2955,6 +2999,7 @@ async function silentReload() {
     S.livetv     = data.liveTV || [];
     S.lastSynced = new Date();
     S.connStatus = 'ok';
+    _indexDirty = true;
     renderLibrary();
     renderScheduleTab();
   } catch (err) {
