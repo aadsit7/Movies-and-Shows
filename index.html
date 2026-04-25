@@ -1002,8 +1002,12 @@ function renderGrid(tab) {
     ? src.filter(raw => {
         const n = norm(raw);
         const haystack = [
-          pick(n, 'title'), pick(n, 'genre'),
-          pick(n, 'streamingon', 'streaming'), pick(n, 'network'),
+          pick(n, 'title'),
+          pick(n, 'genre_primary', 'genre'),
+          pick(n, 'streamingon', 'streaming'),
+          pick(n, 'favorite_team_or_channel', 'network'),
+          pick(n, 'league'),
+          pick(n, 'live_tv_type'),
           pick(n, 'cast'), pick(n, 'director'),
         ].join(' ').toLowerCase();
         return haystack.includes(query);
@@ -1036,9 +1040,9 @@ function renderGrid(tab) {
 function renderCard(raw, tab, idx) {
   const n  = norm(raw);
   const title       = pick(n, 'title');
-  const year        = pick(n, 'year');
-  const genre       = pick(n, 'genre');
-  const rating      = pick(n, 'rating');
+  const year        = pick(n, 'year_started', 'year');
+  const genre       = pick(n, 'genre_primary', 'genre');
+  const rating      = pick(n, 'age_rating', 'rating');
   const imdb        = pick(n, 'imdbscore', 'imdb', 'imdb_score');
   const desc        = pick(n, 'description', 'desc');
   const streaming   = pick(n, 'streamingon', 'streaming', 'streamingplatform');
@@ -1060,7 +1064,7 @@ function renderCard(raw, tab, idx) {
   }
 
   if (tab === 'shows') {
-    const seasons = pick(n, 'seasons', 'season', 'numseasons');
+    const seasons = pick(n, 'seasons_count', 'seasons', 'season', 'numseasons');
     const latest  = pick(n, 'latestepisode', 'latestep', 'episode', 'latestepisodename');
     const status  = pick(n, 'status');
     const network = pick(n, 'network');
@@ -1084,10 +1088,14 @@ function renderCard(raw, tab, idx) {
   }
 
   if (tab === 'livetv') {
-    const channel = pick(n, 'channel');
-    const network = pick(n, 'network');
-    if (channel) extraHtml += `<div class="info-line">📺 Channel: <span>${esc(channel)}</span></div>`;
-    if (network) extraHtml += `<div class="info-line">🏢 Network: <span>${esc(network)}</span></div>`;
+    const channel  = pick(n, 'favorite_team_or_channel', 'channel');
+    const type     = pick(n, 'live_tv_type');
+    const league   = pick(n, 'league');
+    const provider = pick(n, 'default_channel_or_provider');
+    if (channel)  extraHtml += `<div class="info-line">📺 <span>${esc(channel)}</span></div>`;
+    if (type)     extraHtml += `<div class="info-line">📡 <span>${esc(type)}</span></div>`;
+    if (league)   extraHtml += `<div class="info-line">🏆 <span>${esc(league)}</span></div>`;
+    if (provider) extraHtml += `<div class="info-line">🎛️ <span>${esc(provider)}</span></div>`;
   }
 
   return `
@@ -1164,15 +1172,15 @@ async function refreshCard(btn) {
 function renderPreviewCard(parsed, source) {
   const n           = norm(parsed);
   const title       = pick(n, 'title');
-  const year        = pick(n, 'year');
-  const genre       = pick(n, 'genre');
-  const rating      = pick(n, 'rating');
+  const year        = pick(n, 'year_started', 'year');
+  const genre       = pick(n, 'genre_primary', 'genre');
+  const rating      = pick(n, 'age_rating', 'rating');
   const imdb        = pick(n, 'imdbscore', 'imdb');
   const desc        = pick(n, 'description', 'desc');
   const streaming   = pick(n, 'streamingon', 'streaming');
   const director    = pick(n, 'director');
   const cast        = pick(n, 'cast');
-  const seasons     = pick(n, 'seasons', 'season');
+  const seasons     = pick(n, 'seasons_count', 'seasons', 'season');
   const latest      = pick(n, 'latestepisode', 'latestep', 'episode');
   const status      = pick(n, 'status');
   const typeRaw     = pick(n, 'type');
