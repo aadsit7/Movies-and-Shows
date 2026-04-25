@@ -153,6 +153,25 @@ function fetchAllMediaFromSheet() {
   return { success: true, movies: movies, shows: shows, liveTV: liveTV };
 }
 
+/* ── Ensure columns exist ────────────────────────────────── */
+/* Adds any headers from requiredCols that are not yet present as columns
+   in the sheet. Call this before every write so optional fields like
+   next_airs and next_game are never silently dropped. */
+function ensureColumns(sheet, requiredCols) {
+  var lastCol = sheet.getLastColumn();
+  var headers = lastCol > 0
+    ? normalizeHeaders(sheet.getRange(1, 1, 1, lastCol).getValues()[0])
+    : [];
+  var added = 0;
+  for (var i = 0; i < requiredCols.length; i++) {
+    if (headers.indexOf(requiredCols[i]) === -1) {
+      sheet.getRange(1, lastCol + added + 1).setValue(requiredCols[i]);
+      added++;
+    }
+  }
+  if (added > 0) invalidateCache();
+}
+
 /* ── Add row ─────────────────────────────────────────────── */
 function handleAddRow(sheetName, rowData) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -160,6 +179,7 @@ function handleAddRow(sheetName, rowData) {
   if (isLiveTVSheet(sheetName)) {
     var sheet = ss.getSheetByName(LIVE_TV_SHEET);
     if (!sheet) return { error: LIVE_TV_SHEET + ' sheet not found' };
+    ensureColumns(sheet, LIVE_TV_FIELDS);
     var liveRow  = mapToSheetRow(rowData, 'liveTV');
     var liveTitle = (liveRow.favorite_team_or_channel || '').toLowerCase().trim();
     if (liveTitle && hasDuplicate(sheet, 'favorite_team_or_channel', liveTitle)) {
@@ -171,6 +191,7 @@ function handleAddRow(sheetName, rowData) {
     /* Movies and Shows both go into Content_Master */
     var sheet = ss.getSheetByName(CONTENT_MASTER);
     if (!sheet) return { error: CONTENT_MASTER + ' sheet not found' };
+    ensureColumns(sheet, CONTENT_FIELDS);
 
     var kind       = isShowsSheet(sheetName) ? 'TV Show' : 'Movie';
     var contentRow = mapToSheetRow(rowData, kind);
@@ -311,6 +332,10 @@ function handleUpdateRow(sheetName, rowIndex, rowData) {
     : ss.getSheetByName(CONTENT_MASTER);
 
   if (!sheet) return { error: 'Sheet not found for: ' + sheetName };
+
+  /* Ensure all expected columns exist so next_airs / next_game are never
+     silently dropped when the sheet is missing those headers. */
+  ensureColumns(sheet, isLiveTVSheet(sheetName) ? LIVE_TV_FIELDS : CONTENT_FIELDS);
 
   var lastCol  = sheet.getLastColumn();
   var headers  = normalizeHeaders(sheet.getRange(1, 1, 1, lastCol).getValues()[0]);
