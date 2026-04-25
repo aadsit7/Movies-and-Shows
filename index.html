@@ -1596,18 +1596,45 @@ function renderUpcomingRail(tab) {
 /* ════════════════════════════════════════════════════════════
    WEEKLY SCHEDULE
 ════════════════════════════════════════════════════════════ */
+
+/* Returns true when a show is still actively producing new episodes. */
+function isActiveShow(raw) {
+  const s = (pick(norm(raw), 'status') || '').toLowerCase();
+  return !(s.includes('end') || s.includes('cancel') || s.includes('complet') || s.includes('final'));
+}
+
+/* Returns true when a live TV entry is a Mariners or Seahawks entry. */
+function isMarinersOrSeahawks(raw) {
+  const n    = norm(raw);
+  const name = (pick(n, 'favorite_team_or_channel', 'title', 'channel') || '').toLowerCase();
+  const lg   = (pick(n, 'league') || '').toLowerCase();
+  return name.includes('mariners') || name.includes('seahawks') ||
+         lg.includes('mariners')   || lg.includes('seahawks');
+}
+
 function collectThisWeek() {
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const days = {};     // diffDays (0-6) → array of entries
   const recurring = [];
 
-  [{ tab: 'shows', items: S.shows }, { tab: 'livetv', items: S.livetv }].forEach(({ tab, items }) => {
+  /* Shows (active only) + Movies (new-release with a next_airs date) +
+     Live TV (Mariners / Seahawks only) */
+  [
+    { tab: 'shows',  items: S.shows  },
+    { tab: 'movies', items: S.movies },
+    { tab: 'livetv', items: S.livetv }
+  ].forEach(({ tab, items }) => {
     items.forEach((raw, idx) => {
+      /* Skip ended/cancelled/completed shows */
+      if (tab === 'shows' && !isActiveShow(raw)) return;
+      /* Skip live TV entries that are not Mariners or Seahawks */
+      if (tab === 'livetv' && !isMarinersOrSeahawks(raw)) return;
+
       const n    = norm(raw);
-      const text = tab === 'shows'
-        ? pick(n, 'nextairs', 'nextairing', 'airing', 'airs', 'whenitairs')
-        : pick(n, 'nextgame', 'next_game', 'nextairs', 'nextairing', 'airing');
+      const text = tab === 'livetv'
+        ? pick(n, 'nextgame', 'next_game', 'nextairs', 'nextairing', 'airing')
+        : pick(n, 'nextairs', 'nextairing', 'airing', 'airs', 'whenitairs');
       if (!text) return;
 
       const date = parseAiringDate(text);
@@ -1618,7 +1645,8 @@ function collectThisWeek() {
           if (!days[diff]) days[diff] = [];
           days[diff].push({ raw, idx, text, date, tab });
         }
-      } else if (dayOfWeekHint(text)) {
+      } else if (tab !== 'movies' && dayOfWeekHint(text)) {
+        /* Recurring weekly slots (shows / live TV only — movies don't recur) */
         recurring.push({ raw, idx, text, date: null, tab });
       }
     });
@@ -1643,7 +1671,7 @@ function renderScheduleItem(entry) {
   const ps      = platformStyle(network);
   const latest  = tab === 'shows' ? pick(n, 'latestepisode', 'latestep', 'episode', 'latestepisodename') : '';
   const league  = tab === 'livetv' ? pick(n, 'league') : '';
-  const icon    = tab === 'shows' ? '📺' : '📡';
+  const icon    = tab === 'movies' ? '🎬' : tab === 'shows' ? '📺' : '📡';
 
   let timeStr = '';
   if (date) {
@@ -1720,7 +1748,7 @@ function renderScheduleTab() {
     html = `
       <div class="empty-state">
         <div class="big-icon">📅</div>
-        <p>Nothing scheduled this week.<br>Tap 🔄 on show cards to refresh air dates.</p>
+        <p>Nothing scheduled this week.<br>Shows active series, new-release movies, and Mariners/Seahawks games only.<br>Tap 🔄 on cards to refresh air dates.</p>
       </div>`;
   }
 
