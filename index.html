@@ -600,6 +600,27 @@
     .divider { height: 1px; background: var(--border); margin: 10px 0; }
     .text-muted { color: var(--text-2); }
     .text-sm    { font-size: 13px; }
+
+    /* ── Debug panel ──────────────────────────────────────── */
+    #debug-panel {
+      display: none;
+      background: #fffde7;
+      color: #222;
+      border: 2px solid #f9a825;
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin: 10px 14px 0;
+      font-family: monospace;
+      font-size: 12px;
+      word-break: break-all;
+      flex-shrink: 0;
+    }
+    #debug-panel.visible { display: block; }
+    #debug-panel h4 { font-size: 13px; font-weight: 700; color: #e65100; margin-bottom: 8px; }
+    .dbg-label { font-weight: 700; color: #555; display: block; margin: 6px 0 2px; }
+    .dbg-value { background: #fff8e1; border: 1px solid #ffe082; border-radius: 4px; padding: 4px 7px; display: block; white-space: pre-wrap; }
+    .dbg-error { color: #c62828; }
+    #debug-panel button { margin-top: 8px; font-size: 11px; padding: 3px 10px; cursor: pointer; border-radius: 4px; border: 1px solid #f9a825; background: #fff8e1; }
   </style>
 </head>
 <body>
@@ -611,6 +632,9 @@
 
   <!-- Sub-header: search bar / settings title -->
   <div id="sub-header"></div>
+
+  <!-- Temporary debug panel -->
+  <div id="debug-panel"></div>
 
   <!-- Scrollable content -->
   <div id="content">
@@ -833,9 +857,37 @@ function toast(msg, type = '') {
 async function apiGet(params) {
   const url = new URL(APPS_SCRIPT_URL);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  const res = await fetch(url.toString());
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  return res.json();
+  const urlStr = url.toString();
+  let rawText = '';
+  try {
+    const res = await fetch(urlStr);
+    rawText = await res.text();
+    if (!res.ok) {
+      showDebugPanel(urlStr, rawText, 'HTTP ' + res.status);
+      throw new Error('HTTP ' + res.status);
+    }
+    showDebugPanel(urlStr, rawText, null);
+    return JSON.parse(rawText);
+  } catch (err) {
+    showDebugPanel(urlStr, rawText, err.message);
+    throw err;
+  }
+}
+
+function showDebugPanel(url, raw, error) {
+  const panel = document.getElementById('debug-panel');
+  if (!panel) return;
+  panel.className = 'visible';
+  const preview = raw ? raw.slice(0, 500) : '(empty)';
+  panel.innerHTML = `
+    <h4>🐛 Debug — API Response</h4>
+    <span class="dbg-label">URL fetched</span>
+    <span class="dbg-value">${esc(url)}</span>
+    <span class="dbg-label">Raw response (first 500 chars)</span>
+    <span class="dbg-value">${esc(preview)}</span>
+    ${error ? `<span class="dbg-label dbg-error">Error</span><span class="dbg-value dbg-error">${esc(String(error))}</span>` : ''}
+    <br><button onclick="document.getElementById('debug-panel').className=''">Dismiss</button>
+  `;
 }
 
 async function apiPost(body) {
