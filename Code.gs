@@ -372,11 +372,14 @@ function handleUpdateRow(sheetName, rowIndex, rowData) {
   var normalized = mapToSheetRow(rowData, mappedKind);
 
   var row = headers.map(function(h, i) {
-    /* Prefer normalized value, then direct key match, then keep existing cell. */
+    /* Prefer normalized value (from Claude's camelCase keys mapped to sheet headers).
+       Use the existing cell only when Claude didn't return this field at all. */
     var v = normalized[h];
     if (v !== undefined && v !== '') return v;
+    /* Fall back to raw rowData key (direct match) */
     v = rowData[h];
     if (v !== undefined && v !== '') return v;
+    /* Keep existing cell — Claude didn't touch this field */
     return existing[i] !== undefined ? existing[i] : '';
   });
 
