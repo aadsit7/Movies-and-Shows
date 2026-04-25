@@ -104,6 +104,45 @@
     .nav-btn .nav-icon { font-size: 24px; line-height: 1; }
     .nav-btn.active    { color: #00BFFF; }
 
+    /* ── Sub-header row (search + update-all) ─────────────── */
+    .sub-header-row {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+    .sub-header-row .search-wrap { flex: 1; min-width: 0; }
+
+    /* "Update All" pill in the sub-header */
+    .update-all-btn {
+      flex-shrink: 0;
+      height: 48px;
+      padding: 0 14px;
+      border-radius: 12px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: .2px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      transition: opacity .15s, transform .1s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .update-all-btn:active   { transform: scale(.97); }
+    .update-all-btn:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+    .update-all-btn .ua-icon { display: inline-block; line-height: 1; }
+    .update-all-btn.updating .ua-icon { animation: spin .8s linear infinite; }
+    .update-all-btn .ua-count {
+      font-variant-numeric: tabular-nums;
+      opacity: .9;
+      font-weight: 600;
+    }
+    .update-all-btn .ua-count:empty { display: none; }
+
     /* ── Search bar ───────────────────────────────────────── */
     .search-wrap {
       position: relative;
@@ -962,8 +1001,9 @@ const S = {
   filter:       { movies: '', shows: '', livetv: '' },
   connStatus:   null,   // 'ok' | 'err' | null
   lastSynced:   null,
-  refreshingAll: false,
-  sheetPreview: null,   // result object currently shown in sheet/settings
+  refreshingAll:  false,
+  updateProgress: '',   // "3 / 12 · Severance" while Update All is running
+  sheetPreview:   null, // result object currently shown in sheet/settings
 };
 
 /* ════════════════════════════════════════════════════════════
@@ -1214,15 +1254,27 @@ function renderSubHeader(tab) {
     el.innerHTML = `<div style="font-size:19px;font-weight:700;padding:2px 0">⚙️ Settings</div>`;
     return;
   }
-  const labels = { movies: 'Movies', shows: 'Shows', livetv: 'Live TV' };
+  const labels   = { movies: 'Movies', shows: 'Shows', livetv: 'Live TV' };
+  const updating = S.refreshingAll;
   el.innerHTML = `
-    <div class="search-wrap">
-      <input type="search" class="filter-input"
-        placeholder="Search ${labels[tab] || ''}…"
-        value="${esc(S.filter[tab] || '')}"
-        autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-        oninput="onFilter('${tab}', this.value)"
-      >
+    <div class="sub-header-row">
+      <div class="search-wrap">
+        <input type="search" class="filter-input"
+          placeholder="Search ${labels[tab] || ''}…"
+          value="${esc(S.filter[tab] || '')}"
+          autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+          oninput="onFilter('${tab}', this.value)"
+        >
+      </div>
+      <button id="sub-update-all-btn"
+        class="update-all-btn${updating ? ' updating' : ''}"
+        ${updating ? 'disabled' : ''}
+        onclick="updateAll()"
+        title="Re-fetch every movie, show, and channel from Claude and write back to the sheet">
+        <span class="ua-icon">↻</span>
+        <span>Update All</span>
+        <span id="sub-update-all-count" class="ua-count">${updating && S.updateProgress ? S.updateProgress : ''}</span>
+      </button>
     </div>`;
 }
 
@@ -2072,13 +2124,14 @@ function renderSettings() {
         <div class="section-label">Actions</div>
         <div class="settings-card">
           <div class="settings-row col">
-            <span class="sr-label">Refresh All Media</span>
-            <span class="sr-sub">Re-fetch every item via Claude AI</span>
+            <span class="sr-label">Update All Media</span>
+            <span class="sr-sub">Re-fetch every movie, show, and channel from Claude and write the latest details back to the sheet.</span>
             <button class="btn btn-primary btn-full btn-sm" id="refresh-all-btn"
-              onclick="refreshAll()" style="margin-top:4px">
-              Refresh All (${total} items)
+              onclick="updateAll()" style="margin-top:4px"
+              ${S.refreshingAll ? 'disabled' : ''}>
+              Update All (${total} items)
             </button>
-            <div id="refresh-all-progress" style="display:none;font-size:12px;color:var(--text-2);margin-top:4px"></div>
+            <div id="refresh-all-progress" style="display:${S.refreshingAll ? 'block' : 'none'};font-size:12px;color:var(--text-2);margin-top:4px">${S.refreshingAll && S.updateProgress ? esc(S.updateProgress) : ''}</div>
           </div>
         </div>
       </div>
@@ -2119,16 +2172,31 @@ function resetSettingsSearch() {
 }
 
 /* ════════════════════════════════════════════════════════════
-   REFRESH ALL
+   UPDATE ALL — sweep every item through Claude, write back to the
+   sheet, and re-pull from the sheet so the menu always reflects
+   the source of truth.
 ════════════════════════════════════════════════════════════ */
-async function refreshAll() {
+function paintUpdateProgress(text, { disabled, updating }) {
+  S.updateProgress = text || '';
+  const sbBtn   = document.getElementById('sub-update-all-btn');
+  const sbCount = document.getElementById('sub-update-all-count');
+  const stBtn   = document.getElementById('refresh-all-btn');
+  const stProg  = document.getElementById('refresh-all-progress');
+  if (sbBtn) {
+    sbBtn.disabled = !!disabled;
+    sbBtn.classList.toggle('updating', !!updating);
+  }
+  if (sbCount) sbCount.textContent = text || '';
+  if (stBtn)  stBtn.disabled = !!disabled;
+  if (stProg) {
+    stProg.style.display = text ? 'block' : 'none';
+    stProg.textContent   = text || '';
+  }
+}
+
+async function updateAll() {
   if (S.refreshingAll) return;
   S.refreshingAll = true;
-
-  const btn      = document.getElementById('refresh-all-btn');
-  const progress = document.getElementById('refresh-all-progress');
-  if (btn) btn.disabled = true;
-  if (progress) { progress.style.display = 'block'; progress.textContent = 'Starting…'; }
 
   const queue = [
     ...S.movies.map((item, i) => ({ item, tab: 'movies', idx: i })),
@@ -2140,11 +2208,15 @@ async function refreshAll() {
   let done     = 0;
   let errCount = 0;
 
+  paintUpdateProgress(`0 / ${total}`, { disabled: true, updating: true });
+
   for (const { item, tab, idx } of queue) {
     done++;
-    const title   = pick(norm(item), 'title') || '?';
-    const rowIdx  = parseInt(pick(norm(item), 'rowindex', 'row') || String(idx + 2), 10);
-    if (progress) progress.textContent = `Updating ${done} of ${total}: ${title}…`;
+    const title  = pick(norm(item), 'title') || '?';
+    const rowIdx = parseInt(pick(norm(item), 'rowindex', 'row') || '0', 10);
+    paintUpdateProgress(`${done} / ${total} · ${title}`, { disabled: true, updating: true });
+
+    if (!rowIdx) { errCount++; continue; }
 
     try {
       let query = `REFRESH: ${title} — get latest season, latest episode title and number, current streaming platform as of 2026, updated IMDB score`;
@@ -2153,35 +2225,43 @@ async function refreshAll() {
       }
       const parsed = await claudeSearch(query, sheetName(tab));
       if (parsed) {
-        const src  = tab === 'movies' ? S.movies : tab === 'shows' ? S.shows : S.livetv;
-        src[idx]   = { ...item, ...parsed };
+        const src = tab === 'movies' ? S.movies : tab === 'shows' ? S.shows : S.livetv;
+        src[idx]  = { ...item, ...parsed };
         await updateRow(tab, rowIdx, src[idx]);
+        // live UX feedback: redraw the grid the user is currently viewing
+        if (S.tab === tab) renderGrid(tab);
       }
     } catch (err) {
       errCount++;
-      console.error(`refreshAll [${title}]:`, err);
+      console.error(`updateAll [${title}]:`, err);
     }
 
     // brief pause to avoid hammering the Apps Script quota
     await new Promise(r => setTimeout(r, 400));
   }
 
-  // re-render all grids with fresh data
-  ['movies', 'shows', 'livetv'].forEach(t => renderGrid(t));
+  // pull authoritative data back from the spreadsheet so the menu
+  // reflects exactly what was just written
+  try { await loadAllData(); } catch (err) { console.warn('updateAll reload:', err); }
 
   S.lastSynced    = new Date();
   S.refreshingAll = false;
+  S.updateProgress = '';
 
   const summary = errCount
     ? `Done — ${total - errCount}/${total} updated (${errCount} failed)`
     : `Done — all ${total} items updated ✓`;
 
-  if (progress) progress.textContent = summary;
-  if (btn) { btn.disabled = false; btn.textContent = `Refresh All (${total} items)`; }
+  paintUpdateProgress('', { disabled: false, updating: false });
+  const stBtn = document.getElementById('refresh-all-btn');
+  if (stBtn) stBtn.textContent = `Update All (${total} items)`;
 
   toast(summary, errCount ? '' : 'success');
-  renderSettings(); // refresh last-synced timestamp
+  if (S.tab === 'settings') renderSettings();
 }
+
+/* Backwards-compatible alias for any older call sites/onclick handlers. */
+const refreshAll = updateAll;
 
 /* ════════════════════════════════════════════════════════════
    INIT
