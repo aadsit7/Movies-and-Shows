@@ -1622,8 +1622,9 @@ function switchTab(tab) {
   if (tab === 'shows') {
     _indexDirty = true;
     const grid = document.getElementById('grid-library');
-    if (!grid || grid.children.length === 0) {
-      loadTabData('shows');
+    // Reload data if there are no real media cards (covers error/skeleton/empty states)
+    if (!grid || !grid.querySelector('.media-card')) {
+      loadAllData();
     } else {
       renderLibrary();
     }
@@ -1843,11 +1844,12 @@ function renderLibrary() {
     });
   }
 
-  // Deduplicate by title
+  // Deduplicate by tab+title so a Movie and Show with the same name both appear
   const seen = {};
   entries = entries.filter(e => {
-    if (!e.titleLc || seen[e.titleLc]) return false;
-    seen[e.titleLc] = true;
+    const key = e.tab + ':' + e.titleLc;
+    if (!e.titleLc || seen[key]) return false;
+    seen[key] = true;
     return true;
   });
 
@@ -1904,14 +1906,19 @@ function loadAllData() {
     .catch(err => {
       console.error('loadAllData:', err);
       S.connStatus = 'err';
-      if (libGrid) libGrid.innerHTML = `
+      const errHtml = `
         <div class="error-state">
           <div class="big-icon">⚠️</div>
-          <h3>Couldn't load content</h3>
-          <p>Check your connection and sheet setup.</p>
+          <h3>Couldn't connect to Google Sheets</h3>
+          <p>Make sure the Apps Script is deployed and the sheet URL is correct.</p>
           <button class="btn btn-secondary btn-sm" style="margin-top:14px"
-            onclick="loadTabData('shows')">Try Again</button>
+            onclick="loadAllData()">Try Again</button>
         </div>`;
+      if (libGrid) libGrid.innerHTML = errHtml;
+      const schedBody = document.getElementById('schedule-body');
+      if (schedBody && !schedBody.querySelector('.schedule-day-section')) {
+        schedBody.innerHTML = errHtml;
+      }
     });
 }
 
@@ -1959,6 +1966,7 @@ async function loadTabData(tab) {
     S.livetv     = data.liveTV || [];
     S.lastSynced = new Date();
     S.connStatus = 'ok';
+    _indexDirty  = true;
     saveCache();
     if (tab === 'schedule') renderScheduleTab();
     else renderLibrary();
@@ -2149,14 +2157,6 @@ function isActiveShow(raw) {
   return !(s.includes('end') || s.includes('cancel') || s.includes('complet') || s.includes('final'));
 }
 
-/* Returns true when a live TV entry is a Mariners or Seahawks entry. */
-function isMarinersOrSeahawks(raw) {
-  const n    = norm(raw);
-  const name = (pick(n, 'favorite_team_or_channel', 'title', 'channel') || '').toLowerCase();
-  const lg   = (pick(n, 'league') || '').toLowerCase();
-  return name.includes('mariners') || name.includes('seahawks') ||
-         lg.includes('mariners')   || lg.includes('seahawks');
-}
 
 function collectThisWeek() {
   const now = new Date();
@@ -2164,7 +2164,7 @@ function collectThisWeek() {
   const days = {};     // diffDays (0-6) → array of entries
   const recurring = [];
 
-  /* Shows (active only) + Live TV (Mariners / Seahawks only).
+  /* Shows (active only) + all Live TV entries.
      Movies are excluded — the schedule is a TV guide, not a release calendar. */
   [
     { tab: 'shows',  items: S.shows  },
@@ -2173,8 +2173,6 @@ function collectThisWeek() {
     items.forEach((raw, idx) => {
       /* Skip ended/cancelled/completed shows */
       if (tab === 'shows' && !isActiveShow(raw)) return;
-      /* Skip live TV entries that are not Mariners or Seahawks */
-      if (tab === 'livetv' && !isMarinersOrSeahawks(raw)) return;
 
       const n    = norm(raw);
       const text = tab === 'livetv'
@@ -2291,8 +2289,7 @@ function collectCalendarWeek(weekOffset) {
     { tab: 'livetv', items: S.livetv },
   ].forEach(({ tab, items }) => {
     items.forEach((raw, idx) => {
-      if (tab === 'shows'  && !isActiveShow(raw))          return;
-      if (tab === 'livetv' && !isMarinersOrSeahawks(raw))  return;
+      if (tab === 'shows' && !isActiveShow(raw)) return;
 
       const n    = norm(raw);
       const text = tab === 'livetv'
@@ -2497,7 +2494,7 @@ function renderScheduleTab() {
         </div>`
       : `<div class="empty-state">
           <div class="big-icon">📅</div>
-          <p>Nothing coming up in the next 30 days.<br>Shows active series and Mariners/Seahawks games only.<br>Tap ↻ Refresh to pull the latest from your sheet, or 🔄 on cards to update air dates.</p>
+          <p>Nothing scheduled in the next 30 days.<br>Tap ↻ Refresh to pull the latest from your sheet,<br>or tap 🔄 on any card to fetch its air date from the web.</p>
         </div>`;
   }
 
@@ -3536,8 +3533,8 @@ async function autoSyncMissingSchedules() {
 
   if (!needsSync.length) return;
 
-  // Only process 3 items per session to avoid hammering the API quota.
-  const toSync = needsSync.slice(0, 3);
+  // Process up to 10 items per session (throttled with 700ms gaps below).
+  const toSync = needsSync.slice(0, 10);
   let updated  = 0;
 
   for (const { item, tab, idx, rowIdx } of toSync) {
