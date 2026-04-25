@@ -2054,12 +2054,18 @@ async function refreshCard(btn) {
     const parsed = parseMediaResult(result);
     if (!parsed) throw new Error('Could not parse refresh data');
 
-    // merge into state
-    src[idx] = { ...raw, ...parsed };
+    // merge into state (preserve rowIndex from raw since Claude won't return it)
+    src[idx] = { ...raw, ...parsed, rowIndex: raw.rowIndex };
 
-    // best-effort write-back to sheet (don't fail the refresh on this)
+    // write Claude's fresh data to sheet; pass parsed (not the merged object) so
+    // mapToSheetRow on the backend sees only Claude's keys and falls back to the
+    // existing sheet row for anything Claude didn't return — avoids old sheet
+    // values (e.g. seasons_count) silently winning over Claude's fresh values (seasons)
+    let sheetSynced = false;
     try {
-      await updateRow(tab, rowIndex, src[idx]);
+      await updateRow(tab, rowIndex, parsed);
+      sheetSynced = true;
+      S.lastSynced = new Date();
     } catch (writeErr) {
       console.warn('updateRow failed during refresh:', writeErr);
     }
@@ -2076,7 +2082,7 @@ async function refreshCard(btn) {
     renderUpcomingRail(tab);
     renderScheduleTab();
 
-    toast('Updated ✓', 'success');
+    toast(sheetSynced ? 'Updated ✓' : 'Updated (sheet sync failed)', sheetSynced ? 'success' : '');
   } catch (err) {
     console.error('refreshCard:', err);
     overlay.remove();
@@ -2542,13 +2548,21 @@ async function updateAll() {
     try {
       let query = `REFRESH: ${title} — get latest season, latest episode title and number, current streaming platform as of 2026, updated IMDB score`;
       if (tab === 'shows') {
-        query += '. Return JSON with: type, title, year, genre, rating, description, network, seasons, latestEpisode, status, cast, streamingOn, imdbScore';
+        query += `. When does ${title} next air? What channel, day and time? Return JSON with: type, title, year, genre, rating, description, network, seasons, latestEpisode, status, nextAirs, cast, streamingOn, imdbScore`;
+      } else if (tab === 'livetv') {
+        query += `. When is the next game or airing for ${title}? Return JSON with: type, channel, network, league, genre, description, streamingOn, nextGame, tvChannel`;
       }
-      const parsed = await claudeSearch(query, sheetName(tab));
+      // Do NOT pass sheetName — claudeSearch with a sheetName triggers handleAddRow on
+      // the backend, which can create duplicate rows when Claude returns a slightly
+      // different title. Updates go through updateRow only.
+      const parsed = await claudeSearch(query);
       if (parsed) {
         const src = tab === 'movies' ? S.movies : tab === 'shows' ? S.shows : S.livetv;
-        src[idx]  = { ...item, ...parsed };
-        await updateRow(tab, rowIdx, src[idx]);
+        src[idx]  = { ...item, ...parsed, rowIndex: item.rowIndex };
+        // Pass parsed (Claude's data only) — not the merged src[idx] — so mapToSheetRow
+        // on the backend resolves camelCase Claude keys correctly without old sheet
+        // keys (seasons_count, year_started, etc.) shadowing the fresh values.
+        await updateRow(tab, rowIdx, parsed);
         // live UX feedback: redraw the grid the user is currently viewing
         if (S.tab === tab) renderGrid(tab);
       }
