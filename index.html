@@ -458,6 +458,129 @@
     }
     .schedule-item-badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
 
+    /* ── Calendar View ───────────────────────────────────── */
+    .cal-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      padding: 0 2px;
+    }
+    .cal-nav-btn {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 7px 13px;
+      cursor: pointer;
+      transition: opacity .15s;
+    }
+    .cal-nav-btn:active { opacity: .7; }
+    .cal-nav-label {
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      text-align: center;
+      flex: 1;
+      margin: 0 8px;
+    }
+    .cal-week {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      margin: 0 -16px;
+      padding: 0 16px 8px;
+    }
+    .cal-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 5px;
+      min-width: 560px;
+    }
+    .cal-day-col {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+    }
+    .cal-day-header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 7px 4px;
+      border-radius: 8px;
+      margin-bottom: 3px;
+      background: var(--card);
+      border: 1px solid var(--border);
+    }
+    .cal-day-header.cal-today {
+      background: rgba(0,191,255,.15);
+      border-color: var(--accent);
+    }
+    .cal-day-name {
+      font-size: 9px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      color: var(--text-2);
+    }
+    .cal-today .cal-day-name { color: var(--accent); }
+    .cal-day-num {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.2;
+    }
+    .cal-today .cal-day-num { color: var(--accent); }
+    .cal-event {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 5px 5px;
+      font-size: 10px;
+      cursor: pointer;
+      transition: border-color .15s;
+      line-height: 1.3;
+    }
+    .cal-event:active { opacity: .7; }
+    .cal-event-title {
+      font-weight: 700;
+      color: #fff;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      word-break: break-word;
+    }
+    .cal-event-time {
+      color: var(--accent);
+      font-weight: 600;
+      margin-top: 2px;
+      font-size: 9px;
+    }
+    .cal-event-recurring {
+      border-color: rgba(0,191,255,.25);
+      background: rgba(0,191,255,.05);
+    }
+    .cal-event-recurring .cal-event-title { color: var(--text-2); }
+    .cal-event-recurring .cal-event-time  { color: var(--text-2); }
+    .cal-toggle-btn {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-2);
+      font-size: 13px;
+      padding: 6px 10px;
+      cursor: pointer;
+      transition: color .15s, border-color .15s;
+      white-space: nowrap;
+    }
+    .cal-toggle-btn.active {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+
     /* ── Media card ───────────────────────────────────────── */
     .media-card {
       background: #1a1a2e;
@@ -1166,6 +1289,8 @@ const S = {
   refreshingAll:  false,
   updateProgress: '',   // "3 / 12 · Severance" while Update All is running
   sheetPreview:   null, // result object currently shown in sheet/settings
+  calendarView:   false,
+  calendarWeek:   0,    // week offset from current week (0 = this week)
 };
 
 /* ── Search index (rebuilt on data change, reused on every keystroke) ── */
@@ -1517,6 +1642,12 @@ function renderSubHeader(tab) {
             oninput="onFilter('schedule', this.value)"
           >
         </div>
+        <button class="cal-toggle-btn${S.calendarView ? ' active' : ''}"
+          id="schedule-cal-btn"
+          onclick="toggleCalendarView()"
+          title="Toggle calendar view">
+          🗓
+        </button>
         <button class="update-all-btn"
           id="schedule-refresh-btn"
           onclick="refreshScheduleFromSheet()"
@@ -2097,9 +2228,170 @@ async function refreshScheduleFromSheet() {
   }
 }
 
+/* ════════════════════════════════════════════════════════════
+   CALENDAR VIEW
+════════════════════════════════════════════════════════════ */
+
+/* Returns the Monday of the week that contains today, shifted by weekOffset weeks. */
+function getWeekMonday(weekOffset) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dow = today.getDay(); // 0=Sun … 6=Sat
+  const daysToMonday = dow === 0 ? -6 : 1 - dow;
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + daysToMonday + (weekOffset || 0) * 7);
+  return monday;
+}
+
+/* Collect items for a 7-day window starting on the given Monday.
+   Returns an array of 7 arrays (index 0=Mon … 6=Sun). */
+function collectCalendarWeek(weekOffset) {
+  const monday = getWeekMonday(weekOffset);
+  const cols = Array.from({ length: 7 }, () => []);
+
+  const dowNames = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+
+  [
+    { tab: 'shows',  items: S.shows  },
+    { tab: 'livetv', items: S.livetv },
+  ].forEach(({ tab, items }) => {
+    items.forEach((raw, idx) => {
+      if (tab === 'shows'  && !isActiveShow(raw))          return;
+      if (tab === 'livetv' && !isMarinersOrSeahawks(raw))  return;
+
+      const n    = norm(raw);
+      const text = tab === 'livetv'
+        ? pick(n, 'nextgame', 'next_game', 'nextairs', 'nextairing', 'airing')
+        : pick(n, 'nextairs', 'nextairing', 'airing', 'airs', 'whenitairs');
+      if (!text) return;
+
+      const date = parseAiringDate(text);
+      if (date) {
+        // Map JS day (0=Sun…6=Sat) → column index (0=Mon…6=Sun)
+        const colIdx = date.getDay() === 0 ? 6 : date.getDay() - 1;
+        const colDate = new Date(monday);
+        colDate.setDate(monday.getDate() + colIdx);
+        if (
+          date.getFullYear() === colDate.getFullYear() &&
+          date.getMonth()    === colDate.getMonth()    &&
+          date.getDate()     === colDate.getDate()
+        ) {
+          cols[colIdx].push({ raw, idx, text, date, tab, recurring: false });
+        }
+      } else {
+        const hint = dayOfWeekHint(text);
+        if (hint) {
+          const jsDay  = dowNames.indexOf(hint.toLowerCase().replace(/s$/, ''));
+          if (jsDay >= 0) {
+            const colIdx = jsDay === 0 ? 6 : jsDay - 1;
+            cols[colIdx].push({ raw, idx, text, date: null, tab, recurring: true });
+          }
+        }
+      }
+    });
+  });
+
+  return { monday, cols };
+}
+
+function navCalendarWeek(dir) {
+  S.calendarWeek = (S.calendarWeek || 0) + dir;
+  renderScheduleTab();
+}
+
+function toggleCalendarView() {
+  S.calendarView = !S.calendarView;
+  if (!S.calendarView) S.calendarWeek = 0;
+  renderSubHeader(S.tab);
+  renderScheduleTab();
+}
+
+function renderCalendarView() {
+  const weekOffset = S.calendarWeek || 0;
+  const { monday, cols } = collectCalendarWeek(weekOffset);
+  const query = (S.filter.schedule || '').toLowerCase().trim();
+  const scheduleWords = query ? query.split(/\s+/).filter(Boolean) : [];
+
+  const today = new Date();
+  const MON_NAMES  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const CAL_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const weekLabel = monday.getMonth() === sunday.getMonth()
+    ? `${MON_NAMES[monday.getMonth()]} ${monday.getDate()}–${sunday.getDate()}, ${sunday.getFullYear()}`
+    : `${MON_NAMES[monday.getMonth()]} ${monday.getDate()} – ${MON_NAMES[sunday.getMonth()]} ${sunday.getDate()}, ${sunday.getFullYear()}`;
+
+  function matchesQuery(entry) {
+    if (!scheduleWords.length) return true;
+    const n = norm(entry.raw);
+    const haystack = [
+      pick(n, 'title', 'favorite_team_or_channel', 'channel'),
+      pick(n, 'streamingon', 'streaming', 'network'),
+      pick(n, 'league'), pick(n, 'genre_primary', 'genre'), pick(n, 'cast'),
+    ].join(' ').toLowerCase();
+    return scheduleWords.every(w => haystack.includes(w));
+  }
+
+  const colsHtml = cols.map((items, colIdx) => {
+    const colDate = new Date(monday);
+    colDate.setDate(monday.getDate() + colIdx);
+    const isToday = colDate.getFullYear() === today.getFullYear() &&
+                    colDate.getMonth()    === today.getMonth()    &&
+                    colDate.getDate()     === today.getDate();
+
+    const eventsHtml = items.filter(matchesQuery).map(({ raw, idx, text, date, tab, recurring }) => {
+      const n     = norm(raw);
+      const title = pick(n, 'title', 'favorite_team_or_channel', 'channel') || 'Untitled';
+
+      let timeStr = '';
+      if (date) {
+        const h = date.getHours(), m = date.getMinutes();
+        if (h > 0 || m > 0) {
+          const ampm = h >= 12 ? 'pm' : 'am';
+          timeStr = `${h % 12 || 12}${m > 0 ? ':' + String(m).padStart(2, '0') : ''}${ampm}`;
+        }
+      }
+
+      return `
+        <div class="cal-event${recurring ? ' cal-event-recurring' : ''}"
+             onclick="openDetailSheet('${tab}', ${idx})">
+          <div class="cal-event-title">${esc(title)}</div>
+          ${timeStr   ? `<div class="cal-event-time">${esc(timeStr)}</div>` : ''}
+          ${recurring ? `<div class="cal-event-time">weekly</div>` : ''}
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="cal-day-col">
+        <div class="cal-day-header${isToday ? ' cal-today' : ''}">
+          <div class="cal-day-name">${CAL_LABELS[colIdx]}</div>
+          <div class="cal-day-num">${colDate.getDate()}</div>
+        </div>
+        ${eventsHtml}
+      </div>`;
+  }).join('');
+
+  const isPast = weekOffset < 0;
+  return `
+    <div class="cal-nav">
+      <button class="cal-nav-btn" onclick="navCalendarWeek(-1)">← Prev</button>
+      <span class="cal-nav-label">${esc(weekLabel)}</span>
+      <button class="cal-nav-btn" onclick="navCalendarWeek(1)">Next →</button>
+    </div>
+    <div class="cal-week">
+      <div class="cal-grid">${colsHtml}</div>
+    </div>`;
+}
+
 function renderScheduleTab() {
   const container = document.getElementById('schedule-body');
   if (!container) return;
+
+  if (S.calendarView) {
+    container.innerHTML = renderCalendarView();
+    return;
+  }
 
   const { days, recurring } = collectThisWeek();
   const query = (S.filter.schedule || '').toLowerCase().trim();
