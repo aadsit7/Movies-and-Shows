@@ -84,7 +84,7 @@ function readAllMedia() {
     }
   }
 
-  return { movies: movies, shows: shows, liveTV: liveTV };
+  return { success: true, movies: movies, shows: shows, liveTV: liveTV };
 }
 
 /* ── Add row ─────────────────────────────────────────────── */
