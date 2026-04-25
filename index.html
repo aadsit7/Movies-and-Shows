@@ -893,37 +893,9 @@ function toast(msg, type = '') {
 async function apiGet(params) {
   const url = new URL(APPS_SCRIPT_URL);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  const urlStr = url.toString();
-  let rawText = '';
-  try {
-    const res = await fetch(urlStr, { method: 'GET', redirect: 'follow' });
-    rawText = await res.text();
-    if (!res.ok) {
-      showDebugPanel(urlStr, rawText, 'HTTP ' + res.status);
-      throw new Error('HTTP ' + res.status);
-    }
-    showDebugPanel(urlStr, rawText, null);
-    return JSON.parse(rawText);
-  } catch (err) {
-    showDebugPanel(urlStr, rawText, err.message);
-    throw err;
-  }
-}
-
-function showDebugPanel(url, raw, error) {
-  const panel = document.getElementById('debug-panel');
-  if (!panel) return;
-  panel.className = 'visible';
-  const preview = raw ? raw.slice(0, 500) : '(empty)';
-  panel.innerHTML = `
-    <h4>🐛 Debug — API Response</h4>
-    <span class="dbg-label">URL fetched</span>
-    <span class="dbg-value">${esc(url)}</span>
-    <span class="dbg-label">Raw response (first 500 chars)</span>
-    <span class="dbg-value">${esc(preview)}</span>
-    ${error ? `<span class="dbg-label dbg-error">Error</span><span class="dbg-value dbg-error">${esc(String(error))}</span>` : ''}
-    <br><button onclick="document.getElementById('debug-panel').className=''">Dismiss</button>
-  `;
+  const res = await fetch(url.toString(), { method: 'GET', redirect: 'follow' });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
 }
 
 async function apiPost(body) {
@@ -1015,21 +987,38 @@ function onFilter(tab, val) {
 /* ════════════════════════════════════════════════════════════
    DATA LOADING
 ════════════════════════════════════════════════════════════ */
-async function loadAllData() {
+function loadAllData() {
   ['movies', 'shows', 'livetv'].forEach(t => showSkeletons(t, 5));
-  try {
-    const data     = await getAllMedia();
-    S.movies       = data.Movies  || data.movies  || [];
-    S.shows        = data.Shows   || data.shows   || [];
-    S.livetv       = data.liveTV || [];
-    S.lastSynced   = new Date();
-    S.connStatus   = 'ok';
-    ['movies', 'shows', 'livetv'].forEach(t => renderGrid(t));
-  } catch (err) {
-    console.error('loadAllData:', err);
-    S.connStatus = 'err';
-    ['movies', 'shows', 'livetv'].forEach(t => showErrorState(t));
-  }
+  return fetch(APPS_SCRIPT_URL + '?action=getAllMedia', { redirect: 'follow' })
+    .then(r => r.text())
+    .then(text => {
+      const data = JSON.parse(text);
+      renderMovies(data.movies || []);
+      renderShows(data.shows || []);
+      renderLiveTV(data.liveTV || []);
+      S.lastSynced = new Date();
+      S.connStatus = 'ok';
+    })
+    .catch(err => {
+      console.error('loadAllData:', err);
+      S.connStatus = 'err';
+      ['movies', 'shows', 'livetv'].forEach(t => showErrorState(t));
+    });
+}
+
+function renderMovies(items) {
+  S.movies = items;
+  renderGrid('movies');
+}
+
+function renderShows(items) {
+  S.shows = items;
+  renderGrid('shows');
+}
+
+function renderLiveTV(items) {
+  S.livetv = items;
+  renderGrid('livetv');
 }
 
 async function loadTabData(tab) {
