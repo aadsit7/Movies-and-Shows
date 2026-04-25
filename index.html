@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#0f0f0f">
+  <meta name="theme-color" content="#0d0d1a">
   <title>Family Media Tracker</title>
   <style>
     /* ── Reset & tokens ───────────────────────────────────── */
@@ -15,19 +15,19 @@
       -webkit-tap-highlight-color: transparent;
     }
     :root {
-      --bg:          #0f0f0f;
-      --card:        #1a1a1a;
+      --bg:          #0d0d1a;
+      --card:        #1a1a2e;
       --card-alt:    #222;
-      --border:      #2a2a2a;
-      --text:        #f0f0f0;
-      --text-2:      #888;
+      --border:      #2a2a3e;
+      --text:        #ffffff;
+      --text-2:      #8888aa;
       --text-3:      #555;
-      --accent:      #6366f1;
-      --accent-dim:  rgba(99,102,241,.18);
+      --accent:      #00BFFF;
+      --accent-dim:  rgba(0,191,255,.18);
       --success:     #22c55e;
       --error:       #ef4444;
       --warn:        #facc15;
-      --nav-h:       60px;
+      --nav-h:       72px;
       --safe-bottom: env(safe-area-inset-bottom, 0px);
     }
 
@@ -35,9 +35,9 @@
     html { height: 100%; }
     body {
       height: 100%;
-      background: var(--bg);
+      background: #0d0d1a;
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
       font-size: 15px;
       line-height: 1.4;
       overflow-x: hidden;
@@ -56,7 +56,7 @@
     /* sticky sub-header (search bar) per tab */
     #sub-header {
       flex-shrink: 0;
-      background: var(--bg);
+      background: #0d0d1a;
       border-bottom: 1px solid var(--border);
       padding: 10px 14px;
     }
@@ -78,7 +78,7 @@
       display: flex;
       height: calc(var(--nav-h) + var(--safe-bottom));
       padding-bottom: var(--safe-bottom);
-      background: #111;
+      background: #0d0d1a;
       border-top: 1px solid var(--border);
       position: relative;
       z-index: 200;
@@ -92,16 +92,17 @@
       gap: 3px;
       background: none;
       border: none;
-      color: var(--text-2);
-      font-size: 10px;
+      color: #555;
+      font-size: 11px;
       font-weight: 600;
       letter-spacing: .3px;
       cursor: pointer;
       transition: color .15s;
-      padding: 8px 4px 6px;
+      padding: 10px 4px 8px;
+      min-height: 48px;
     }
-    .nav-btn .nav-icon { font-size: 22px; line-height: 1; }
-    .nav-btn.active    { color: var(--accent); }
+    .nav-btn .nav-icon { font-size: 24px; line-height: 1; }
+    .nav-btn.active    { color: #00BFFF; }
 
     /* ── Search bar ───────────────────────────────────────── */
     .search-wrap {
@@ -119,12 +120,13 @@
     input[type="search"].filter-input,
     input[type="text"].filter-input {
       width: 100%;
-      background: #1e1e1e;
+      height: 48px;
+      background: #1a1a2e;
       border: 1px solid var(--border);
       border-radius: 12px;
-      padding: 10px 14px 10px 38px;
+      padding: 0 14px 0 38px;
       color: var(--text);
-      font-size: 15px;
+      font-size: 16px;
       outline: none;
       appearance: none;
       -webkit-appearance: none;
@@ -148,10 +150,11 @@
 
     /* ── Media card ───────────────────────────────────────── */
     .media-card {
-      background: var(--card);
+      background: #1a1a2e;
       border: 1px solid var(--border);
+      border-left: 4px solid #00BFFF;
       border-radius: 16px;
-      padding: 14px 14px 12px;
+      padding: 16px;
       position: relative;
       animation: fadeUp .3s ease both;
       overflow: hidden;
@@ -162,10 +165,11 @@
     }
 
     .card-title {
-      font-size: 16px;
+      font-size: 18px;
       font-weight: 700;
+      color: #ffffff;
       line-height: 1.25;
-      padding-right: 32px;  /* avoid overlap with refresh btn */
+      padding-right: 56px;  /* avoid overlap with refresh btn */
       margin-bottom: 4px;
     }
     .card-meta {
@@ -175,14 +179,14 @@
       align-items: center;
       margin-bottom: 8px;
     }
-    .meta-year   { color: var(--text-2); font-size: 12px; }
-    .meta-dot    { color: var(--text-3); font-size: 11px; }
+    .meta-year   { color: #8888aa; font-size: 13px; }
+    .meta-dot    { color: var(--text-3); font-size: 13px; }
     .meta-genre  {
-      background: #252525;
-      color: var(--text-2);
+      background: #252540;
+      color: #8888aa;
       border-radius: 5px;
       padding: 1px 7px;
-      font-size: 11px;
+      font-size: 13px;
     }
 
     /* badges row */
@@ -194,9 +198,9 @@
       margin-bottom: 8px;
     }
     .platform-badge {
-      padding: 3px 9px;
-      border-radius: 5px;
-      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
       font-weight: 700;
       letter-spacing: .2px;
     }
@@ -275,15 +279,15 @@
     /* refresh button */
     .refresh-btn {
       position: absolute;
-      top: 12px;
-      right: 12px;
-      width: 28px;
-      height: 28px;
-      background: #252525;
+      top: 8px;
+      right: 8px;
+      width: 48px;
+      height: 48px;
+      background: #252540;
       border: 1px solid var(--border);
       border-radius: 50%;
       color: var(--text-2);
-      font-size: 13px;
+      font-size: 16px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -355,6 +359,7 @@
       align-items: center;
       justify-content: center;
       gap: 6px;
+      min-height: 48px;
       padding: 12px 20px;
       border-radius: 12px;
       border: none;
@@ -366,10 +371,10 @@
     }
     .btn:active        { transform: scale(.97); }
     .btn:disabled      { opacity: .45; cursor: not-allowed; transform: none; }
-    .btn-primary       { background: var(--accent); color: #fff; }
-    .btn-secondary     { background: #252525; color: var(--text); border: 1px solid var(--border); }
+    .btn-primary       { background: #00BFFF; color: #fff; }
+    .btn-secondary     { background: #252540; color: var(--text); border: 1px solid var(--border); }
     .btn-full          { width: 100%; }
-    .btn-sm            { padding: 9px 16px; font-size: 13px; }
+    .btn-sm            { padding: 9px 16px; font-size: 13px; min-height: 48px; }
 
     /* ── Spinner (inline) ─────────────────────────────────── */
     .spinner {
@@ -398,23 +403,23 @@
       position: fixed;
       right: 18px;
       bottom: calc(var(--nav-h) + var(--safe-bottom) + 14px);
-      width: 54px;
-      height: 54px;
+      width: 56px;
+      height: 56px;
       border-radius: 50%;
-      background: var(--accent);
+      background: #00BFFF;
       color: #fff;
-      font-size: 26px;
+      font-size: 28px;
       line-height: 1;
       border: none;
       cursor: pointer;
-      box-shadow: 0 4px 20px rgba(99,102,241,.45);
+      box-shadow: 0 4px 20px rgba(0,191,255,.45);
       display: flex;
       align-items: center;
       justify-content: center;
       z-index: 150;
       transition: transform .15s, box-shadow .15s;
     }
-    #fab:active { transform: scale(.94); box-shadow: 0 2px 10px rgba(99,102,241,.3); }
+    #fab:active { transform: scale(.94); box-shadow: 0 2px 10px rgba(0,191,255,.3); }
     #fab.hidden { display: none; }
 
     /* ── Bottom sheet ─────────────────────────────────────── */
@@ -473,12 +478,13 @@
     }
     .search-row input {
       flex: 1;
-      background: #1e1e1e;
+      height: 48px;
+      background: #1a1a2e;
       border: 1px solid var(--border);
       border-radius: 12px;
-      padding: 12px 14px;
+      padding: 0 14px;
       color: var(--text);
-      font-size: 15px;
+      font-size: 16px;
       outline: none;
       -webkit-appearance: none;
     }
@@ -600,27 +606,6 @@
     .divider { height: 1px; background: var(--border); margin: 10px 0; }
     .text-muted { color: var(--text-2); }
     .text-sm    { font-size: 13px; }
-
-    /* ── Debug panel ──────────────────────────────────────── */
-    #debug-panel {
-      display: none;
-      background: #fffde7;
-      color: #222;
-      border: 2px solid #f9a825;
-      border-radius: 10px;
-      padding: 12px 14px;
-      margin: 10px 14px 0;
-      font-family: monospace;
-      font-size: 12px;
-      word-break: break-all;
-      flex-shrink: 0;
-    }
-    #debug-panel.visible { display: block; }
-    #debug-panel h4 { font-size: 13px; font-weight: 700; color: #e65100; margin-bottom: 8px; }
-    .dbg-label { font-weight: 700; color: #555; display: block; margin: 6px 0 2px; }
-    .dbg-value { background: #fff8e1; border: 1px solid #ffe082; border-radius: 4px; padding: 4px 7px; display: block; white-space: pre-wrap; }
-    .dbg-error { color: #c62828; }
-    #debug-panel button { margin-top: 8px; font-size: 11px; padding: 3px 10px; cursor: pointer; border-radius: 4px; border: 1px solid #f9a825; background: #fff8e1; }
   </style>
 </head>
 <body>
@@ -632,9 +617,6 @@
 
   <!-- Sub-header: search bar / settings title -->
   <div id="sub-header"></div>
-
-  <!-- Temporary debug panel -->
-  <div id="debug-panel"></div>
 
   <!-- Scrollable content -->
   <div id="content">
