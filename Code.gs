@@ -134,16 +134,40 @@ function handleUpdateRow(sheetName, rowIndex, rowData) {
 
 /* ── Claude search ───────────────────────────────────────── */
 function handleClaudeSearch(query, sheetName) {
-  if (!ANTHROPIC_API_KEY) {
-    return { error: 'ANTHROPIC_API_KEY is not configured on the server' };
-  }
-  if (!query || !String(query).trim()) {
-    return { error: 'Empty search query' };
-  }
+  var prompt = 'You are a media database assistant. The user searched for: "' + query + '"\n\n' +
+    'Return ONLY valid JSON, no markdown, no explanation.\n\n' +
+    'For a Movie use:\n' +
+    '{"type":"Movie","title":"","year":"","genre":"","rating":"","description":"","director":"","cast":"","streamingOn":"","imdbScore":""}\n\n' +
+    'For a TV Show use:\n' +
+    '{"type":"Show","title":"","year":"","genre":"","rating":"","description":"","network":"","seasons":"","latestEpisode":"","status":"","cast":"","streamingOn":"","imdbScore":""}\n\n' +
+    'For Live TV or Sports use:\n' +
+    '{"type":"LiveTV","channel":"","network":"","league":"","genre":"","description":"","streamingOn":"","nextGame":"","tvChannel":""}\n\n' +
+    'Be accurate. Real data only. JSON only.';
+
+  var response = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+    method: 'post',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01'
+    },
+    payload: JSON.stringify({
+      model: 'claude-opus-4-5',
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: prompt }]
+    }),
+    muteHttpExceptions: true
+  });
+
+  var result = JSON.parse(response.getContentText());
+  var text = result.content && result.content[0] ? result.content[0].text : '{}';
+
   try {
-    return claudeEnrichSearch(String(query).trim(), sheetName);
-  } catch (err) {
-    return { error: 'Claude search failed: ' + err.message };
+    var mediaData = JSON.parse(text);
+    if (sheetName) handleAddRow(sheetName, mediaData);
+    return { success: true, data: mediaData };
+  } catch(e) {
+    return { error: 'Could not parse response', raw: text };
   }
 }
 
