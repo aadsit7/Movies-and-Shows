@@ -1197,8 +1197,8 @@
   </nav>
 </div>
 
-<!-- Floating + button -->
-<button id="fab" class="hidden" onclick="openSheet()">+</button>
+<!-- Floating + button (visible on schedule and library tabs) -->
+<button id="fab" onclick="openSheet()">+</button>
 
 <!-- Bottom sheet scrim -->
 <div class="sheet-scrim" id="sheet-scrim" onclick="closeSheet()"></div>
@@ -1429,7 +1429,12 @@ function parseMediaResult(raw) {
 function resultTab(parsed) {
   const t = (pick(norm(parsed), 'type') || '').toLowerCase();
   if (t.includes('show') || t.includes('series')) return 'shows';
-  if (t.includes('live') || t.includes('channel') || t.includes('tv channel')) return 'livetv';
+  if (t.includes('live') || t.includes('channel') || t.includes('tv channel') ||
+      t.includes('sport') || t.includes('team') || t.includes('league') ||
+      t.includes('nfl') || t.includes('nba') || t.includes('mlb') ||
+      t.includes('nhl') || t.includes('mls') || t.includes('baseball') ||
+      t.includes('football') || t.includes('basketball') ||
+      t.includes('hockey') || t.includes('soccer')) return 'livetv';
   return 'movies';
 }
 
@@ -1596,8 +1601,8 @@ function switchTab(tab) {
   document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
   document.getElementById('nav-' + tab).classList.add('active');
 
-  // FAB: show only on library tab
-  document.getElementById('fab').classList.toggle('hidden', tab !== 'shows');
+  // FAB: show on all content tabs (hide only on settings)
+  document.getElementById('fab').classList.toggle('hidden', tab === 'settings');
 
   // render sub-header
   renderSubHeader(tab);
@@ -1613,8 +1618,9 @@ function switchTab(tab) {
     return;
   }
 
-  // Library tab ('shows'): load if grid is empty
+  // Library tab ('shows'): always rebuild index so newly added items appear
   if (tab === 'shows') {
+    _indexDirty = true;
     const grid = document.getElementById('grid-library');
     if (!grid || grid.children.length === 0) {
       loadTabData('shows');
@@ -1698,13 +1704,16 @@ function renderSubHeader(tab) {
       <div class="sub-header-row">
         <div class="search-wrap">
           <input type="search" class="filter-input" id="settings-search-input"
-            placeholder="Find a movie, show, or channel…"
+            placeholder="Search your library…"
+            value="${esc(S.filter.settings || '')}"
             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+            oninput="onFilter('settings', this.value)"
             onkeydown="if(event.key==='Enter') doSettingsSearch()"
           >
         </div>
-        <button class="update-all-btn" onclick="doSettingsSearch()" title="Search">
-          <span class="ua-icon">🔍</span>
+        <button class="update-all-btn" onclick="doSettingsSearch()" title="Search Claude for new titles to add">
+          <span class="ua-icon">+</span>
+          <span>Add</span>
         </button>
       </div>`;
   }
@@ -1716,7 +1725,32 @@ function onFilter(tab, val) {
   _filterTimer = setTimeout(() => {
     if (tab === 'schedule') renderScheduleTab();
     else if (tab === 'shows') renderLibrary();
+    else if (tab === 'settings') renderSettingsFilter();
   }, 150);
+}
+
+function renderSettingsFilter() {
+  const resultEl = document.getElementById('result-settings');
+  if (!resultEl) return;
+  const rawQuery = (S.filter.settings || '').trim();
+  if (!rawQuery) { resultEl.innerHTML = ''; return; }
+
+  if (_indexDirty) buildSearchIndex();
+  const words = rawQuery.toLowerCase().split(/\s+/).filter(Boolean);
+  const matches = searchIndex
+    .filter(e => words.every(w => e.haystack.includes(w)))
+    .slice(0, 12);
+
+  if (!matches.length) {
+    resultEl.innerHTML = `<p style="color:var(--text-2);font-size:13px;padding:12px 0 4px">No results for &ldquo;${esc(rawQuery)}&rdquo;</p>`;
+    return;
+  }
+
+  resultEl.innerHTML = `
+    <div style="margin-bottom:12px">
+      <div class="section-label" style="margin-bottom:8px">Library Results</div>
+      <div class="cards-grid">${matches.map(({ raw, tab, idx }) => renderCard(raw, tab, idx)).join('')}</div>
+    </div>`;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -1862,6 +1896,7 @@ function loadAllData() {
       S.livetv = data.liveTV || [];
       S.lastSynced = new Date();
       S.connStatus = 'ok';
+      _indexDirty = true;
       saveCache();
       renderLibrary();
       renderScheduleTab();
@@ -2885,7 +2920,7 @@ async function deleteItem(btn) {
 ════════════════════════════════════════════════════════════ */
 function renderPreviewCard(parsed, source) {
   const n           = norm(parsed);
-  const title       = pick(n, 'title');
+  const title       = pick(n, 'title', 'channel', 'favorite_team_or_channel');
   const year        = pick(n, 'year_started', 'year');
   const genre       = pick(n, 'genre_primary', 'genre');
   const rating      = pick(n, 'age_rating', 'rating');
@@ -3023,7 +3058,12 @@ function resolveAddTarget(typeRaw) {
   if (t.includes('show') || t.includes('series')) {
     return { sheet: 'Shows',  label: 'Show',    cls: 'type-show'   };
   }
-  if (t.includes('live') || t.includes('channel')) {
+  if (t.includes('live') || t.includes('channel') ||
+      t.includes('sport') || t.includes('team') ||
+      t.includes('league') || t.includes('nfl') || t.includes('nba') ||
+      t.includes('mlb') || t.includes('nhl') || t.includes('mls') ||
+      t.includes('baseball') || t.includes('football') ||
+      t.includes('basketball') || t.includes('hockey') || t.includes('soccer')) {
     return { sheet: 'LiveTV', label: 'Live TV', cls: 'type-livetv' };
   }
   return   { sheet: 'Movies', label: 'Movie',   cls: 'type-movie'  };
@@ -3255,6 +3295,9 @@ function renderSettings() {
       </div>
 
     </div>`;
+
+  // Re-apply any active library filter
+  renderSettingsFilter();
 }
 
 async function doSettingsSearch() {
@@ -3268,7 +3311,7 @@ async function doSettingsSearch() {
 
   try {
     const parsed = await claudeSearch(query);
-    if (!parsed || !pick(norm(parsed), 'title')) {
+    if (!parsed || !pick(norm(parsed), 'title', 'channel', 'favorite_team_or_channel')) {
       resultEl.innerHTML = `<p class="text-muted text-sm" style="padding:16px 0">
         Couldn't find info for &ldquo;${esc(query)}&rdquo; — try a more specific title.</p>`;
       return;
