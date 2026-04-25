@@ -115,18 +115,42 @@ function handleAddRow(sheetName, rowData) {
   if (isLiveTVSheet(sheetName)) {
     var sheet = ss.getSheetByName(LIVE_TV_SHEET);
     if (!sheet) return { error: LIVE_TV_SHEET + ' sheet not found' };
-    appendByHeaders(sheet, mapToSheetRow(rowData, 'liveTV'));
+    var liveRow  = mapToSheetRow(rowData, 'liveTV');
+    var liveTitle = (liveRow.favorite_team_or_channel || '').toLowerCase().trim();
+    if (liveTitle && hasDuplicate(sheet, 'favorite_team_or_channel', liveTitle)) {
+      return { success: true, duplicate: true };
+    }
+    appendByHeaders(sheet, liveRow);
 
   } else {
     /* Movies and Shows both go into Content_Master */
     var sheet = ss.getSheetByName(CONTENT_MASTER);
     if (!sheet) return { error: CONTENT_MASTER + ' sheet not found' };
 
-    var kind = isShowsSheet(sheetName) ? 'TV Show' : 'Movie';
-    appendByHeaders(sheet, mapToSheetRow(rowData, kind));
+    var kind       = isShowsSheet(sheetName) ? 'TV Show' : 'Movie';
+    var contentRow = mapToSheetRow(rowData, kind);
+    var titleVal   = (contentRow.title || '').toLowerCase().trim();
+    if (titleVal && hasDuplicate(sheet, 'title', titleVal)) {
+      return { success: true, duplicate: true };
+    }
+    appendByHeaders(sheet, contentRow);
   }
 
   return { success: true };
+}
+
+/* Returns true if the sheet already has a row whose titleHeader column
+   matches newTitle (case-insensitive). */
+function hasDuplicate(sheet, titleHeader, newTitle) {
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return false;
+  var headers  = normalizeHeaders(data[0]);
+  var titleIdx = headers.indexOf(titleHeader);
+  if (titleIdx === -1) return false;
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][titleIdx]).toLowerCase().trim() === newTitle) return true;
+  }
+  return false;
 }
 
 /* ── Map Claude's output keys → sheet header keys ────────── */
@@ -193,10 +217,26 @@ function handleUpdateRow(sheetName, rowIndex, rowData) {
 
   if (!sheet) return { error: 'Sheet not found for: ' + sheetName };
 
-  var headers = normalizeHeaders(sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]);
-  var row     = headers.map(function(h) { return rowData[h] !== undefined ? rowData[h] : ''; });
-  sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+  var lastCol  = sheet.getLastColumn();
+  var headers  = normalizeHeaders(sheet.getRange(1, 1, 1, lastCol).getValues()[0]);
+  var existing = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
 
+  /* Normalize Claude-style keys (streamingOn → streaming_on, etc.)
+     so a refresh always persists the freshest values from Claude. */
+  var kind       = inferContentKind(sheetName);
+  var mappedKind = kind === 'liveTV' ? 'liveTV' : (kind === 'TV Show' ? 'TV Show' : 'Movie');
+  var normalized = mapToSheetRow(rowData, mappedKind);
+
+  var row = headers.map(function(h, i) {
+    /* Prefer normalized value, then direct key match, then keep existing cell. */
+    var v = normalized[h];
+    if (v !== undefined && v !== '') return v;
+    v = rowData[h];
+    if (v !== undefined && v !== '') return v;
+    return existing[i] !== undefined ? existing[i] : '';
+  });
+
+  sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
   return { success: true };
 }
 
