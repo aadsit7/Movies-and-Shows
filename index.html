@@ -104,6 +104,38 @@
     .nav-btn .nav-icon { font-size: 24px; line-height: 1; }
     .nav-btn.active    { color: #00BFFF; }
 
+    /* ── Type filter chips ────────────────────────────────── */
+    .type-chips {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      padding-bottom: 2px;
+      margin-top: 8px;
+    }
+    .type-chips::-webkit-scrollbar { display: none; }
+    .type-chip {
+      flex-shrink: 0;
+      height: 34px;
+      padding: 0 14px;
+      border-radius: 999px;
+      background: #1a1a2e;
+      border: 1px solid var(--border);
+      color: var(--text-2);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background .15s, color .15s, border-color .15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .type-chip.active {
+      background: var(--accent-dim);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
     /* ── Sub-header row (search + update-all) ─────────────── */
     .sub-header-row {
       display: flex;
@@ -972,21 +1004,10 @@
 
   <!-- Scrollable content -->
   <div id="content">
-    <!-- Movies tab -->
-    <div id="tab-movies" class="tab-panel">
-      <div class="cards-grid" id="grid-movies"></div>
-    </div>
-
-    <!-- Shows tab -->
+    <!-- Library tab (movies + shows + live TV combined) -->
     <div id="tab-shows" class="tab-panel">
-      <div id="upcoming-shows" class="upcoming-section"></div>
-      <div class="cards-grid" id="grid-shows"></div>
-    </div>
-
-    <!-- Live TV tab -->
-    <div id="tab-livetv" class="tab-panel">
-      <div id="upcoming-livetv" class="upcoming-section"></div>
-      <div class="cards-grid" id="grid-livetv"></div>
+      <div id="upcoming-library" class="upcoming-section"></div>
+      <div class="cards-grid" id="grid-library"></div>
     </div>
 
     <!-- Schedule tab -->
@@ -996,23 +1017,18 @@
 
     <!-- Settings tab -->
     <div id="tab-settings" class="tab-panel">
+      <div id="result-settings-top" style="margin-bottom:4px"></div>
       <div id="settings-body"></div>
     </div>
   </div>
 
-  <!-- Bottom navigation -->
+  <!-- Bottom navigation (3 tabs) -->
   <nav id="bottom-nav">
-    <button class="nav-btn"        id="nav-movies"  onclick="switchTab('movies')">
-      <span class="nav-icon">🎬</span>Movies
-    </button>
-    <button class="nav-btn"        id="nav-shows"   onclick="switchTab('shows')">
-      <span class="nav-icon">📺</span>Shows
-    </button>
-    <button class="nav-btn"        id="nav-livetv"  onclick="switchTab('livetv')">
-      <span class="nav-icon">📡</span>Live TV
-    </button>
     <button class="nav-btn active"  id="nav-schedule" onclick="switchTab('schedule')">
       <span class="nav-icon">📅</span>Schedule
+    </button>
+    <button class="nav-btn"        id="nav-shows"   onclick="switchTab('shows')">
+      <span class="nav-icon">🎬</span>Library
     </button>
     <button class="nav-btn"        id="nav-settings" onclick="switchTab('settings')">
       <span class="nav-icon">⚙️</span>Settings
@@ -1104,8 +1120,9 @@ const S = {
   movies:       [],
   shows:        [],
   livetv:       [],
-  tab:          'movies',
-  filter:       { movies: '', shows: '', livetv: '', schedule: '' },
+  tab:          'schedule',
+  libraryType:  'all',   // 'all' | 'movies' | 'shows' | 'livetv'
+  filter:       { shows: '', schedule: '', settings: '' },
   connStatus:   null,   // 'ok' | 'err' | null
   lastSynced:   null,
   refreshingAll:  false,
@@ -1339,29 +1356,32 @@ function switchTab(tab) {
   document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
   document.getElementById('nav-' + tab).classList.add('active');
 
-  // FAB: hide on settings and schedule
-  document.getElementById('fab').classList.toggle('hidden', tab === 'settings' || tab === 'schedule');
+  // FAB: show only on library tab
+  document.getElementById('fab').classList.toggle('hidden', tab !== 'shows');
 
   // render sub-header
   renderSubHeader(tab);
 
-  // settings tab: re-render settings pane
   if (tab === 'settings') {
     renderSettings();
     return;
   }
 
-  // schedule tab: always pull fresh data from the sheet so the guide
-  // reflects the source of truth, then render.
   if (tab === 'schedule') {
-    renderScheduleTab();           // show what we have immediately
-    loadAllData();                 // then fetch latest from sheet in background
+    renderScheduleTab();
+    loadAllData();
     return;
   }
 
-  // media tabs: load data if grid is empty
-  const grid = document.getElementById('grid-' + tab);
-  if (grid && grid.children.length === 0) loadTabData(tab);
+  // Library tab ('shows'): load if grid is empty
+  if (tab === 'shows') {
+    const grid = document.getElementById('grid-library');
+    if (!grid || grid.children.length === 0) {
+      loadTabData('shows');
+    } else {
+      renderLibrary();
+    }
+  }
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -1369,10 +1389,7 @@ function switchTab(tab) {
 ════════════════════════════════════════════════════════════ */
 function renderSubHeader(tab) {
   const el = document.getElementById('sub-header');
-  if (tab === 'settings') {
-    el.innerHTML = `<div style="font-size:19px;font-weight:700;padding:2px 0">⚙️ Settings</div>`;
-    return;
-  }
+
   if (tab === 'schedule') {
     const updating = S.refreshingAll;
     el.innerHTML = `
@@ -1404,78 +1421,241 @@ function renderSubHeader(tab) {
       </div>`;
     return;
   }
-  const labels   = { movies: 'Movies', shows: 'Shows', livetv: 'Live TV' };
-  const updating = S.refreshingAll;
-  el.innerHTML = `
-    <div class="sub-header-row">
-      <div class="search-wrap">
-        <input type="search" class="filter-input"
-          placeholder="Search ${labels[tab] || ''}…"
-          value="${esc(S.filter[tab] || '')}"
-          autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-          oninput="onFilter('${tab}', this.value)"
-        >
+
+  if (tab === 'shows') {
+    const chips = [
+      { key: 'all',    label: 'All' },
+      { key: 'movies', label: '🎬 Movies' },
+      { key: 'shows',  label: '📺 Shows' },
+      { key: 'livetv', label: '📡 Live TV' },
+    ];
+    el.innerHTML = `
+      <div class="sub-header-row">
+        <div class="search-wrap">
+          <input type="search" class="filter-input"
+            placeholder="Search library…"
+            value="${esc(S.filter.shows || '')}"
+            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+            oninput="onFilter('shows', this.value)"
+          >
+        </div>
       </div>
-      <button id="sub-update-all-btn"
-        class="update-all-btn${updating ? ' updating' : ''}"
-        ${updating ? 'disabled' : ''}
-        onclick="updateAll()"
-        title="Re-fetch every movie, show, and channel from Claude and write back to the sheet">
-        <span class="ua-icon">↻</span>
-        <span>Update All</span>
-        <span id="sub-update-all-count" class="ua-count">${updating && S.updateProgress ? S.updateProgress : ''}</span>
-      </button>
-    </div>`;
+      <div class="type-chips">
+        ${chips.map(c => `<button class="type-chip${S.libraryType === c.key ? ' active' : ''}"
+          onclick="setLibraryType('${c.key}')">${c.label}</button>`).join('')}
+      </div>`;
+    return;
+  }
+
+  if (tab === 'settings') {
+    el.innerHTML = `
+      <div class="sub-header-row">
+        <div class="search-wrap">
+          <input type="search" class="filter-input" id="settings-search-input"
+            placeholder="Find a movie, show, or channel…"
+            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+            onkeydown="if(event.key==='Enter') doSettingsSearch()"
+          >
+        </div>
+        <button class="update-all-btn" onclick="doSettingsSearch()" title="Search">
+          <span class="ua-icon">🔍</span>
+        </button>
+      </div>`;
+  }
 }
 
 function onFilter(tab, val) {
   S.filter[tab] = val;
   if (tab === 'schedule') renderScheduleTab();
-  else renderGrid(tab);
+  else if (tab === 'shows') renderLibrary();
+}
+
+/* ════════════════════════════════════════════════════════════
+   LIBRARY TYPE CHIP
+════════════════════════════════════════════════════════════ */
+function setLibraryType(type) {
+  S.libraryType = type;
+  renderSubHeader('shows');
+  renderLibrary();
+}
+
+/* ════════════════════════════════════════════════════════════
+   UPCOMING RAIL — combined shows + live TV for the library tab
+════════════════════════════════════════════════════════════ */
+function renderUpcomingLibrary() {
+  const el = document.getElementById('upcoming-library');
+  if (!el) return;
+
+  if ((S.filter.shows || '').trim()) { el.innerHTML = ''; return; }
+
+  const type = S.libraryType;
+  let items = [];
+  if (type === 'all' || type === 'shows') {
+    collectUpcoming('shows').forEach(it => items.push({ ...it, tabKey: 'shows' }));
+  }
+  if (type === 'all' || type === 'livetv') {
+    collectUpcoming('livetv').forEach(it => items.push({ ...it, tabKey: 'livetv' }));
+  }
+
+  items.sort((a, b) => {
+    if (a.date && b.date) return a.date - b.date;
+    if (a.date) return -1;
+    if (b.date) return 1;
+    return 0;
+  });
+
+  if (!items.length) { el.innerHTML = ''; return; }
+
+  el.innerHTML = `
+    <div class="upcoming-heading">
+      <span class="upcoming-heading-title">📅 Coming Up</span>
+      <span class="upcoming-count">${items.length}</span>
+    </div>
+    <div class="upcoming-rail">
+      ${items.map(it => renderUpcomingCard(it, it.tabKey)).join('')}
+    </div>`;
+}
+
+/* ════════════════════════════════════════════════════════════
+   LIBRARY GRID — combined movies + shows + live TV
+════════════════════════════════════════════════════════════ */
+function renderLibrary() {
+  const query = (S.filter.shows || '').toLowerCase().trim();
+  const type  = S.libraryType;
+  const cutoff = Date.now() - 36 * 3600 * 1000;
+
+  let allItems = [];
+  if (type === 'all' || type === 'shows') {
+    S.shows.forEach((raw, idx) => allItems.push({ raw, tab: 'shows', idx }));
+  }
+  if (type === 'all' || type === 'livetv') {
+    S.livetv.forEach((raw, idx) => allItems.push({ raw, tab: 'livetv', idx }));
+  }
+  if (type === 'all' || type === 'movies') {
+    S.movies.forEach((raw, idx) => allItems.push({ raw, tab: 'movies', idx }));
+  }
+
+  if (query) {
+    allItems = allItems.filter(({ raw }) => {
+      const n = norm(raw);
+      return [
+        pick(n, 'title'),
+        pick(n, 'genre_primary', 'genre'),
+        pick(n, 'streamingon', 'streaming'),
+        pick(n, 'favorite_team_or_channel', 'network'),
+        pick(n, 'league'),
+        pick(n, 'live_tv_type'),
+        pick(n, 'cast'),
+        pick(n, 'director'),
+      ].join(' ').toLowerCase().includes(query);
+    });
+  } else {
+    // Sort shows and live TV by upcoming air date; movies stay at end
+    allItems.sort((a, b) => {
+      if (a.tab === 'movies' && b.tab !== 'movies') return 1;
+      if (a.tab !== 'movies' && b.tab === 'movies') return -1;
+      const na = norm(a.raw), nb = norm(b.raw);
+      const sa = a.tab === 'shows'
+        ? pick(na, 'nextairs', 'nextairing', 'airing', 'airs', 'whenitairs')
+        : pick(na, 'nextgame', 'next_game', 'nextairs', 'nextairing');
+      const sb = b.tab === 'shows'
+        ? pick(nb, 'nextairs', 'nextairing', 'airing', 'airs', 'whenitairs')
+        : pick(nb, 'nextgame', 'next_game', 'nextairs', 'nextairing');
+      const da = parseAiringDate(sa), db = parseAiringDate(sb);
+      const af = da && da.getTime() > cutoff;
+      const bf = db && db.getTime() > cutoff;
+      if (af && bf) return da - db;
+      if (af) return -1;
+      if (bf) return 1;
+      return 0;
+    });
+  }
+
+  // Deduplicate by title
+  const seen = {};
+  allItems = allItems.filter(({ raw }) => {
+    const key = (pick(norm(raw), 'title', 'favorite_team_or_channel') || '').toLowerCase().trim();
+    if (!key || seen[key]) return false;
+    seen[key] = true;
+    return true;
+  });
+
+  renderUpcomingLibrary();
+
+  const grid = document.getElementById('grid-library');
+  if (!grid) return;
+
+  if (!allItems.length) {
+    grid.innerHTML = `
+      <div class="empty-state">
+        <div class="big-icon">🎬</div>
+        <p>${query
+          ? `No results for &ldquo;${esc(query)}&rdquo;`
+          : 'Nothing here yet — tap <strong>+</strong> to add!'}</p>
+      </div>`;
+    return;
+  }
+
+  grid.innerHTML = allItems.map(({ raw, tab, idx }) => renderCard(raw, tab, idx)).join('');
+  grid.querySelectorAll('.media-card').forEach((card, i) => {
+    card.style.animationDelay = (i * 0.045) + 's';
+  });
 }
 
 /* ════════════════════════════════════════════════════════════
    DATA LOADING
 ════════════════════════════════════════════════════════════ */
 function loadAllData() {
-  ['movies', 'shows', 'livetv'].forEach(t => showSkeletons(t, 5));
+  const libGrid = document.getElementById('grid-library');
+  if (libGrid && !libGrid.querySelector('.media-card')) {
+    libGrid.innerHTML = Array.from({ length: 6 }, () => `
+      <div class="skeleton-card">
+        <div class="skel skel-title"></div>
+        <div class="skel skel-sub"></div>
+        <div class="skel skel-badge" style="margin:10px 0 6px"></div>
+        <div class="skel skel-desc"></div>
+      </div>`).join('');
+  }
   return fetch(APPS_SCRIPT_URL + '?action=getAllMedia', { redirect: 'follow' })
     .then(r => r.text())
     .then(text => {
-      console.log('RAW RESPONSE:', text.substring(0, 500));
       const data = JSON.parse(text);
-      const movies = data.movies || [];
-      const shows  = data.shows  || [];
-      const liveTV = data.liveTV || [];
-      console.log('Movies:', movies.length, 'Shows:', shows.length, 'LiveTV:', liveTV.length);
-      renderMovies(movies);
-      renderShows(shows);
-      renderLiveTV(liveTV);
+      S.movies = data.movies || [];
+      S.shows  = data.shows  || [];
+      S.livetv = data.liveTV || [];
       S.lastSynced = new Date();
       S.connStatus = 'ok';
+      renderLibrary();
+      renderScheduleTab();
     })
     .catch(err => {
-      console.log('FETCH ERROR:', err.message);
       console.error('loadAllData:', err);
       S.connStatus = 'err';
-      ['movies', 'shows', 'livetv'].forEach(t => showErrorState(t));
+      if (libGrid) libGrid.innerHTML = `
+        <div class="error-state">
+          <div class="big-icon">⚠️</div>
+          <h3>Couldn't load content</h3>
+          <p>Check your connection and sheet setup.</p>
+          <button class="btn btn-secondary btn-sm" style="margin-top:14px"
+            onclick="loadTabData('shows')">Try Again</button>
+        </div>`;
     });
 }
 
 function renderMovies(items) {
   S.movies = items;
-  renderGrid('movies');
+  renderLibrary();
 }
 
 function renderShows(items) {
   S.shows = items;
-  renderGrid('shows');
+  renderLibrary();
   renderScheduleTab();
 }
 
 function renderLiveTV(items) {
   S.livetv = items;
-  renderGrid('livetv');
+  renderLibrary();
   renderScheduleTab();
 }
 
@@ -1487,17 +1667,24 @@ async function loadTabData(tab) {
         <p>Loading schedule…</p>
       </div>`;
   } else {
-    showSkeletons(tab, 5);
+    const libGrid = document.getElementById('grid-library');
+    if (libGrid) libGrid.innerHTML = Array.from({ length: 5 }, () => `
+      <div class="skeleton-card">
+        <div class="skel skel-title"></div>
+        <div class="skel skel-sub"></div>
+        <div class="skel skel-badge" style="margin:10px 0 6px"></div>
+        <div class="skel skel-desc"></div>
+      </div>`).join('');
   }
   try {
-    const data     = await getAllMedia();
-    S.movies       = data.Movies  || data.movies  || [];
-    S.shows        = data.Shows   || data.shows   || [];
-    S.livetv       = data.liveTV || [];
-    S.lastSynced   = new Date();
-    S.connStatus   = 'ok';
+    const data   = await getAllMedia();
+    S.movies     = data.Movies  || data.movies  || [];
+    S.shows      = data.Shows   || data.shows   || [];
+    S.livetv     = data.liveTV || [];
+    S.lastSynced = new Date();
+    S.connStatus = 'ok';
     if (tab === 'schedule') renderScheduleTab();
-    else renderGrid(tab);
+    else renderLibrary();
   } catch (err) {
     console.error('loadTabData:', err);
     S.connStatus = 'err';
@@ -1511,7 +1698,15 @@ async function loadTabData(tab) {
             onclick="loadTabData('schedule')">Try Again</button>
         </div>`;
     } else {
-      showErrorState(tab);
+      const libGrid = document.getElementById('grid-library');
+      if (libGrid) libGrid.innerHTML = `
+        <div class="error-state">
+          <div class="big-icon">⚠️</div>
+          <h3>Couldn't load content</h3>
+          <p>Check your connection and sheet setup.</p>
+          <button class="btn btn-secondary btn-sm" style="margin-top:14px"
+            onclick="loadTabData('shows')">Try Again</button>
+        </div>`;
     }
   }
 }
@@ -2190,7 +2385,7 @@ async function refreshCard(btn) {
     card.replaceWith(newCard);
 
     // The newly fetched next_airs / next_game may have changed the rail and schedule.
-    renderUpcomingRail(tab);
+    renderUpcomingLibrary();
     renderScheduleTab();
 
     toast(sheetSynced ? 'Updated ✓' : 'Updated (sheet sync failed)', sheetSynced ? 'success' : '');
@@ -2228,7 +2423,7 @@ async function deleteItem(btn) {
     if (result.error) throw new Error(result.error);
 
     src.splice(idx, 1);
-    renderGrid(tab);
+    renderLibrary();
     toast(`"${title}" removed`, 'success');
   } catch (err) {
     btn.textContent = '🗑️';
@@ -2306,11 +2501,11 @@ async function confirmAdd(source) {
       return;
     }
 
-    // update local state optimistically so the tab grid refreshes immediately
+    // update local state optimistically so the library refreshes immediately
     if (tab === 'movies')      S.movies.push(parsed);
     else if (tab === 'shows')  S.shows.push(parsed);
     else                       S.livetv.push(parsed);
-    renderGrid(tab);
+    renderLibrary();
     // show the new item in the schedule straight away (it may have nextAirs)
     renderScheduleTab();
 
@@ -2556,21 +2751,8 @@ function renderSettings() {
   document.getElementById('settings-body').innerHTML = `
     <div class="settings-wrap">
 
-      <!-- Discovery -->
-      <div>
-        <div class="discovery-intro">
-          <h2>Find Something New</h2>
-          <p>Search for any movie, show, or channel to add to your library</p>
-        </div>
-        <div class="search-row">
-          <input type="search" id="settings-input"
-            placeholder="e.g. Severance, Interstellar…"
-            autocomplete="off" autocorrect="off" autocapitalize="off"
-            onkeydown="if(event.key==='Enter') doSettingsSearch()">
-          <button class="btn btn-primary btn-sm" onclick="doSettingsSearch()">Search</button>
-        </div>
-        <div id="result-settings"></div>
-      </div>
+      <!-- Search results area (populated by sub-header search) -->
+      <div id="result-settings"></div>
 
       <!-- App info -->
       <div>
@@ -2627,11 +2809,12 @@ function renderSettings() {
 }
 
 async function doSettingsSearch() {
-  const input = document.getElementById('settings-input');
+  const input = document.getElementById('settings-search-input');
   const query = (input?.value || '').trim();
   if (!query) return;
 
   const resultEl = document.getElementById('result-settings');
+  if (!resultEl) return;
   resultEl.innerHTML = `<div class="loading-row"><div class="spinner"></div>Claude is looking this up…</div>`;
 
   try {
@@ -2652,7 +2835,7 @@ async function doSettingsSearch() {
 
 function resetSettingsSearch() {
   S.sheetPreview = null;
-  const input = document.getElementById('settings-input');
+  const input = document.getElementById('settings-search-input');
   if (input) { input.value = ''; input.focus(); }
   const resultEl = document.getElementById('result-settings');
   if (resultEl) resultEl.innerHTML = '';
@@ -2723,8 +2906,8 @@ async function updateAll() {
         // on the backend resolves camelCase Claude keys correctly without old sheet
         // keys (seasons_count, year_started, etc.) shadowing the fresh values.
         await updateRow(tab, rowIdx, parsed);
-        // live UX feedback: redraw the grid the user is currently viewing
-        if (S.tab === tab) renderGrid(tab);
+        // live UX feedback: redraw the library grid
+        renderLibrary();
         // always keep the schedule in sync as show/live-TV air dates change
         if (tab === 'shows' || tab === 'livetv') renderScheduleTab();
       }
@@ -2766,12 +2949,14 @@ const refreshAll = updateAll;
 ════════════════════════════════════════════════════════════ */
 async function silentReload() {
   try {
-    const data = await getAllMedia();
-    renderMovies(data.movies  || data.Movies  || []);
-    renderShows (data.shows   || data.Shows   || []);
-    renderLiveTV(data.liveTV  || []);
+    const data   = await getAllMedia();
+    S.movies     = data.movies || data.Movies || [];
+    S.shows      = data.shows  || data.Shows  || [];
+    S.livetv     = data.liveTV || [];
     S.lastSynced = new Date();
     S.connStatus = 'ok';
+    renderLibrary();
+    renderScheduleTab();
   } catch (err) {
     console.warn('silentReload:', err);
   }
