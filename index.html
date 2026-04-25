@@ -949,10 +949,12 @@ async function apiGet(params) {
 }
 
 async function apiPost(body) {
+  // text/plain skips the CORS preflight that Apps Script can't answer.
   const res = await fetch(APPS_SCRIPT_URL, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify(body),
+    method:   'POST',
+    headers:  { 'Content-Type': 'text/plain;charset=utf-8' },
+    body:     JSON.stringify(body),
+    redirect: 'follow',
   });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
@@ -1042,14 +1044,20 @@ function loadAllData() {
   return fetch(APPS_SCRIPT_URL + '?action=getAllMedia', { redirect: 'follow' })
     .then(r => r.text())
     .then(text => {
+      console.log('RAW RESPONSE:', text.substring(0, 500));
       const data = JSON.parse(text);
-      renderMovies(data.movies || []);
-      renderShows(data.shows || []);
-      renderLiveTV(data.liveTV || []);
+      const movies = data.movies || [];
+      const shows  = data.shows  || [];
+      const liveTV = data.liveTV || [];
+      console.log('Movies:', movies.length, 'Shows:', shows.length, 'LiveTV:', liveTV.length);
+      renderMovies(movies);
+      renderShows(shows);
+      renderLiveTV(liveTV);
       S.lastSynced = new Date();
       S.connStatus = 'ok';
     })
     .catch(err => {
+      console.log('FETCH ERROR:', err.message);
       console.error('loadAllData:', err);
       S.connStatus = 'err';
       ['movies', 'shows', 'livetv'].forEach(t => showErrorState(t));
@@ -1384,9 +1392,10 @@ async function refreshCard(btn) {
     let response;
     try {
       response = await fetch(APPS_SCRIPT_URL, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ action: 'claudeSearch', query }),
+        method:   'POST',
+        headers:  { 'Content-Type': 'text/plain;charset=utf-8' },
+        body:     JSON.stringify({ action: 'claudeSearch', query }),
+        redirect: 'follow',
       });
     } catch (netErr) {
       throw new Error('Network unreachable');
@@ -1581,9 +1590,10 @@ async function doSheetSearch() {
   let response;
   try {
     response = await fetch(APPS_SCRIPT_URL, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ action: 'claudeSearch', query }),
+      method:   'POST',
+      headers:  { 'Content-Type': 'text/plain;charset=utf-8' },
+      body:     JSON.stringify({ action: 'claudeSearch', query }),
+      redirect: 'follow',
     });
   } catch (netErr) {
     console.error('doSheetSearch network:', netErr);
@@ -1671,10 +1681,13 @@ async function confirmSheetAdd(sheetTarget) {
 
   let response;
   try {
+    const postBody = { action: 'addRow', sheetName: sheetTarget, rowData: data };
+    console.log('POST body:', JSON.stringify(postBody));
     response = await fetch(APPS_SCRIPT_URL, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ action: 'addRow', sheetName: sheetTarget, rowData: data }),
+      method:   'POST',
+      headers:  { 'Content-Type': 'text/plain;charset=utf-8' },
+      body:     JSON.stringify(postBody),
+      redirect: 'follow',
     });
   } catch (netErr) {
     console.error('confirmSheetAdd network:', netErr);
@@ -1698,6 +1711,7 @@ async function confirmSheetAdd(sheetTarget) {
     toast('Add failed — invalid server response', 'error');
     return;
   }
+  console.log('POST response:', JSON.stringify(result));
 
   if (result && result.error) {
     if (btn) { btn.disabled = false; btn.textContent = 'Add to Library'; }
