@@ -70,6 +70,7 @@ function doPost(e) {
 
     if (action === 'addRow')            return respondJson(handleAddRow(body.sheetName, body.rowData));
     if (action === 'updateRow')         return respondJson(handleUpdateRow(body.sheetName, body.rowIndex, body.rowData));
+    if (action === 'deleteRow')         return respondJson(handleDeleteRow(body.sheetName, body.rowIndex));
     if (action === 'claudeSearch')      return respondJson(handleClaudeSearch(body.query, body.sheetName));
     if (action === 'removeDuplicates')  return respondJson(removeDuplicatesFromSheet(body.sheetName));
 
@@ -331,6 +332,24 @@ function handleUpdateRow(sheetName, rowIndex, rowData) {
   });
 
   sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+  invalidateCache();
+  return { success: true };
+}
+
+/* ── Delete row ──────────────────────────────────────────── */
+function handleDeleteRow(sheetName, rowIndex) {
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = isLiveTVSheet(sheetName)
+    ? ss.getSheetByName(LIVE_TV_SHEET)
+    : ss.getSheetByName(CONTENT_MASTER);
+
+  if (!sheet) return { error: 'Sheet not found for: ' + sheetName };
+
+  var rowNum = parseInt(rowIndex, 10);
+  if (isNaN(rowNum) || rowNum < 2) return { error: 'Invalid rowIndex: ' + rowIndex };
+  if (rowNum > sheet.getLastRow()) return { error: 'Row out of range: ' + rowIndex };
+
+  sheet.deleteRow(rowNum);
   invalidateCache();
   return { success: true };
 }
