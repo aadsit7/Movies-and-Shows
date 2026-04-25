@@ -933,7 +933,7 @@ async function loadAllData() {
     const data     = await getAllMedia();
     S.movies       = data.Movies  || data.movies  || [];
     S.shows        = data.Shows   || data.shows   || [];
-    S.livetv       = data.LiveTV  || data.livetv  || data.LiveTv || [];
+    S.livetv       = data.liveTV || [];
     S.lastSynced   = new Date();
     S.connStatus   = 'ok';
     ['movies', 'shows', 'livetv'].forEach(t => renderGrid(t));
@@ -950,7 +950,7 @@ async function loadTabData(tab) {
     const data     = await getAllMedia();
     S.movies       = data.Movies  || data.movies  || [];
     S.shows        = data.Shows   || data.shows   || [];
-    S.livetv       = data.LiveTV  || data.livetv  || data.LiveTv || [];
+    S.livetv       = data.liveTV || [];
     S.lastSynced   = new Date();
     S.connStatus   = 'ok';
     renderGrid(tab);
