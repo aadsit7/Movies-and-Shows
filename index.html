@@ -860,7 +860,7 @@ async function apiGet(params) {
   const urlStr = url.toString();
   let rawText = '';
   try {
-    const res = await fetch(urlStr);
+    const res = await fetch(urlStr, { method: 'GET', redirect: 'follow' });
     rawText = await res.text();
     if (!res.ok) {
       showDebugPanel(urlStr, rawText, 'HTTP ' + res.status);
