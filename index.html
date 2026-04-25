@@ -311,6 +311,83 @@
       font-weight: 600;
     }
 
+    /* ── Weekly Schedule ─────────────────────────────────── */
+    .schedule-day-section { margin-bottom: 22px; }
+    .schedule-day-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      padding: 0 2px;
+    }
+    .schedule-day-label {
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: var(--accent);
+    }
+    .schedule-day-label.schedule-today    { color: #4ade80; }
+    .schedule-day-label.schedule-tomorrow { color: #facc15; }
+    .schedule-day-date {
+      font-size: 12px;
+      color: var(--text-2);
+      font-weight: 500;
+    }
+    .schedule-day-count {
+      margin-left: auto;
+      background: var(--accent-dim);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+    }
+    .schedule-items { display: flex; flex-direction: column; gap: 8px; }
+    .schedule-item {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      cursor: pointer;
+      animation: fadeUp .3s ease both;
+      transition: border-color .15s;
+    }
+    .schedule-item:active { opacity: .8; }
+    .schedule-item-main {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .schedule-item-icon { font-size: 20px; line-height: 1; flex-shrink: 0; padding-top: 1px; }
+    .schedule-item-info { flex: 1; min-width: 0; }
+    .schedule-item-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1.25;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .schedule-item-ep {
+      font-size: 12px;
+      color: var(--accent);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .schedule-item-when { font-size: 12px; color: var(--text-2); margin-top: 2px; }
+    .schedule-item-time {
+      flex-shrink: 0;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      align-self: center;
+    }
+    .schedule-item-badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+
     /* ── Media card ───────────────────────────────────────── */
     .media-card {
       background: #1a1a2e;
@@ -890,6 +967,11 @@
       <div class="cards-grid" id="grid-livetv"></div>
     </div>
 
+    <!-- Schedule tab -->
+    <div id="tab-schedule" class="tab-panel">
+      <div id="schedule-body"></div>
+    </div>
+
     <!-- Settings tab -->
     <div id="tab-settings" class="tab-panel">
       <div id="settings-body"></div>
@@ -906,6 +988,9 @@
     </button>
     <button class="nav-btn"        id="nav-livetv"  onclick="switchTab('livetv')">
       <span class="nav-icon">📡</span>Live TV
+    </button>
+    <button class="nav-btn"        id="nav-schedule" onclick="switchTab('schedule')">
+      <span class="nav-icon">📅</span>Schedule
     </button>
     <button class="nav-btn"        id="nav-settings" onclick="switchTab('settings')">
       <span class="nav-icon">⚙️</span>Settings
@@ -1228,8 +1313,8 @@ function switchTab(tab) {
   document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
   document.getElementById('nav-' + tab).classList.add('active');
 
-  // FAB: hide on settings
-  document.getElementById('fab').classList.toggle('hidden', tab === 'settings');
+  // FAB: hide on settings and schedule
+  document.getElementById('fab').classList.toggle('hidden', tab === 'settings' || tab === 'schedule');
 
   // render sub-header
   renderSubHeader(tab);
@@ -1237,6 +1322,13 @@ function switchTab(tab) {
   // settings tab: re-render settings pane
   if (tab === 'settings') {
     renderSettings();
+    return;
+  }
+
+  // schedule tab: render weekly view (load data first if needed)
+  if (tab === 'schedule') {
+    if (S.shows.length === 0 && S.livetv.length === 0) loadTabData('schedule');
+    else renderScheduleTab();
     return;
   }
 
@@ -1252,6 +1344,29 @@ function renderSubHeader(tab) {
   const el = document.getElementById('sub-header');
   if (tab === 'settings') {
     el.innerHTML = `<div style="font-size:19px;font-weight:700;padding:2px 0">⚙️ Settings</div>`;
+    return;
+  }
+  if (tab === 'schedule') {
+    const now = new Date();
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 6);
+    const fmt = d => d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    const updating = S.refreshingAll;
+    el.innerHTML = `
+      <div class="sub-header-row" style="align-items:center">
+        <div style="flex:1">
+          <div style="font-size:18px;font-weight:700;line-height:1.2">📅 This Week</div>
+          <div style="font-size:12px;color:var(--text-2);margin-top:2px">${fmt(now)} – ${fmt(end)}</div>
+        </div>
+        <button id="sub-update-all-btn"
+          class="update-all-btn${updating ? ' updating' : ''}"
+          ${updating ? 'disabled' : ''}
+          onclick="updateAll()"
+          title="Refresh all air dates from Claude">
+          <span class="ua-icon">↻</span>
+          <span>Update All</span>
+          <span id="sub-update-all-count" class="ua-count">${updating && S.updateProgress ? S.updateProgress : ''}</span>
+        </button>
+      </div>`;
     return;
   }
   const labels   = { movies: 'Movies', shows: 'Shows', livetv: 'Live TV' };
@@ -1319,15 +1434,25 @@ function renderMovies(items) {
 function renderShows(items) {
   S.shows = items;
   renderGrid('shows');
+  renderScheduleTab();
 }
 
 function renderLiveTV(items) {
   S.livetv = items;
   renderGrid('livetv');
+  renderScheduleTab();
 }
 
 async function loadTabData(tab) {
-  showSkeletons(tab, 5);
+  if (tab === 'schedule') {
+    document.getElementById('schedule-body').innerHTML = `
+      <div class="empty-state">
+        <div class="big-icon" style="animation:spin 1s linear infinite;display:inline-block">↻</div>
+        <p>Loading schedule…</p>
+      </div>`;
+  } else {
+    showSkeletons(tab, 5);
+  }
   try {
     const data     = await getAllMedia();
     S.movies       = data.Movies  || data.movies  || [];
@@ -1335,11 +1460,23 @@ async function loadTabData(tab) {
     S.livetv       = data.liveTV || [];
     S.lastSynced   = new Date();
     S.connStatus   = 'ok';
-    renderGrid(tab);
+    if (tab === 'schedule') renderScheduleTab();
+    else renderGrid(tab);
   } catch (err) {
     console.error('loadTabData:', err);
     S.connStatus = 'err';
-    showErrorState(tab);
+    if (tab === 'schedule') {
+      document.getElementById('schedule-body').innerHTML = `
+        <div class="error-state">
+          <div class="big-icon">⚠️</div>
+          <h3>Couldn't load schedule</h3>
+          <p>Check your connection and sheet setup.</p>
+          <button class="btn btn-secondary btn-sm" style="margin-top:14px"
+            onclick="loadTabData('schedule')">Try Again</button>
+        </div>`;
+    } else {
+      showErrorState(tab);
+    }
   }
 }
 
@@ -1454,6 +1591,145 @@ function renderUpcomingRail(tab) {
     <div class="upcoming-rail">
       ${items.map(it => renderUpcomingCard(it, tab)).join('')}
     </div>`;
+}
+
+/* ════════════════════════════════════════════════════════════
+   WEEKLY SCHEDULE
+════════════════════════════════════════════════════════════ */
+function collectThisWeek() {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = {};     // diffDays (0-6) → array of entries
+  const recurring = [];
+
+  [{ tab: 'shows', items: S.shows }, { tab: 'livetv', items: S.livetv }].forEach(({ tab, items }) => {
+    items.forEach((raw, idx) => {
+      const n    = norm(raw);
+      const text = tab === 'shows'
+        ? pick(n, 'nextairs', 'nextairing', 'airing', 'airs', 'whenitairs')
+        : pick(n, 'nextgame', 'next_game', 'nextairs', 'nextairing', 'airing');
+      if (!text) return;
+
+      const date = parseAiringDate(text);
+      if (date) {
+        const startOfTarget = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        const diff = Math.round((startOfTarget - startOfToday) / 86400000);
+        if (diff >= 0 && diff < 7) {
+          if (!days[diff]) days[diff] = [];
+          days[diff].push({ raw, idx, text, date, tab });
+        }
+      } else if (dayOfWeekHint(text)) {
+        recurring.push({ raw, idx, text, date: null, tab });
+      }
+    });
+  });
+
+  // sort items within each day by time
+  Object.values(days).forEach(arr => arr.sort((a, b) => {
+    if (a.date && b.date) return a.date - b.date;
+    return 0;
+  }));
+
+  return { days, recurring };
+}
+
+function renderScheduleItem(entry) {
+  const { raw, idx, text, date, tab } = entry;
+  const n       = norm(raw);
+  const title   = pick(n, 'title', 'favorite_team_or_channel', 'channel') || 'Untitled';
+  const network = tab === 'shows'
+    ? pick(n, 'streamingon', 'streaming', 'network')
+    : pick(n, 'tvchannel', 'default_channel_or_provider', 'streamingon', 'network');
+  const ps      = platformStyle(network);
+  const latest  = tab === 'shows' ? pick(n, 'latestepisode', 'latestep', 'episode', 'latestepisodename') : '';
+  const league  = tab === 'livetv' ? pick(n, 'league') : '';
+  const icon    = tab === 'shows' ? '📺' : '📡';
+
+  let timeStr = '';
+  if (date) {
+    const h = date.getHours(), m = date.getMinutes();
+    if (h > 0 || m > 0) {
+      const ampm = h >= 12 ? 'pm' : 'am';
+      timeStr = `${h % 12 || 12}${m > 0 ? ':' + String(m).padStart(2, '0') : ''}${ampm}`;
+    }
+  }
+
+  return `
+    <div class="schedule-item" onclick="openDetailSheet('${tab}', ${idx})">
+      <div class="schedule-item-main">
+        <span class="schedule-item-icon">${icon}</span>
+        <div class="schedule-item-info">
+          <div class="schedule-item-title">${esc(title)}</div>
+          ${latest ? `<div class="schedule-item-ep">${esc(latest)}</div>` : ''}
+          <div class="schedule-item-when">${esc(text)}</div>
+        </div>
+        ${timeStr ? `<div class="schedule-item-time">${esc(timeStr)}</div>` : ''}
+      </div>
+      ${network || league ? `
+      <div class="schedule-item-badges">
+        ${network ? `<span class="upcoming-platform" style="background:${ps.bg};color:${ps.fg};${ps.border ? 'border:' + ps.border : ''}">${esc(network)}</span>` : ''}
+        ${league  ? `<span class="upcoming-league">${esc(league)}</span>` : ''}
+      </div>` : ''}
+    </div>`;
+}
+
+function renderScheduleTab() {
+  const container = document.getElementById('schedule-body');
+  if (!container) return;
+
+  const { days, recurring } = collectThisWeek();
+  const now = new Date();
+  const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const MON_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  let html = '';
+  for (let i = 0; i < 7; i++) {
+    const items = days[i];
+    if (!items || !items.length) continue;
+    const d     = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
+    const label = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : DAY_NAMES[d.getDay()];
+    const cls   = i === 0 ? 'schedule-today' : i === 1 ? 'schedule-tomorrow' : '';
+    html += `
+      <div class="schedule-day-section">
+        <div class="schedule-day-header">
+          <span class="schedule-day-label ${cls}">${label}</span>
+          <span class="schedule-day-date">${MON_NAMES[d.getMonth()]} ${d.getDate()}</span>
+          <span class="schedule-day-count">${items.length}</span>
+        </div>
+        <div class="schedule-items">
+          ${items.map(e => renderScheduleItem(e)).join('')}
+        </div>
+      </div>`;
+  }
+
+  if (recurring.length) {
+    html += `
+      <div class="schedule-day-section">
+        <div class="schedule-day-header">
+          <span class="schedule-day-label">Recurring</span>
+          <span class="schedule-day-date">Weekly schedule</span>
+          <span class="schedule-day-count">${recurring.length}</span>
+        </div>
+        <div class="schedule-items">
+          ${recurring.map(e => renderScheduleItem(e)).join('')}
+        </div>
+      </div>`;
+  }
+
+  if (!html) {
+    html = `
+      <div class="empty-state">
+        <div class="big-icon">📅</div>
+        <p>Nothing scheduled this week.<br>Tap 🔄 on show cards to refresh air dates.</p>
+      </div>`;
+  }
+
+  container.innerHTML = html;
+
+  // stagger animations
+  container.querySelectorAll('.schedule-item').forEach((el, i) => {
+    el.style.animationDelay = (i * 0.04) + 's';
+  });
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -1796,8 +2072,9 @@ async function refreshCard(btn) {
     newCard.style.animationDelay = '0s';
     card.replaceWith(newCard);
 
-    // The newly fetched next_airs / next_game may have changed the rail.
+    // The newly fetched next_airs / next_game may have changed the rail and schedule.
     renderUpcomingRail(tab);
+    renderScheduleTab();
 
     toast('Updated ✓', 'success');
   } catch (err) {
