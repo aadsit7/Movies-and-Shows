@@ -2556,6 +2556,14 @@ function renderSettings() {
             </button>
             <div id="refresh-all-progress" style="display:${S.refreshingAll ? 'block' : 'none'};font-size:12px;color:var(--text-2);margin-top:4px">${S.refreshingAll && S.updateProgress ? esc(S.updateProgress) : ''}</div>
           </div>
+          <div class="settings-row col" style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px">
+            <span class="sr-label">Clean Up Duplicates</span>
+            <span class="sr-sub">Scan the Google Sheet for duplicate titles and remove them, then reload the guide.</span>
+            <button class="btn btn-secondary btn-full btn-sm" id="dedup-btn"
+              onclick="deduplicateAll(false)" style="margin-top:4px">
+              Clean Up Duplicates
+            </button>
+          </div>
         </div>
       </div>
 
@@ -2697,6 +2705,65 @@ async function updateAll() {
 const refreshAll = updateAll;
 
 /* ════════════════════════════════════════════════════════════
+   SILENT RELOAD — re-fetches sheet data without showing skeletons.
+   Used after background operations (dedup) that may shift row indices.
+════════════════════════════════════════════════════════════ */
+async function silentReload() {
+  try {
+    const data = await getAllMedia();
+    renderMovies(data.movies  || data.Movies  || []);
+    renderShows (data.shows   || data.Shows   || []);
+    renderLiveTV(data.liveTV  || []);
+    S.lastSynced = new Date();
+    S.connStatus = 'ok';
+  } catch (err) {
+    console.warn('silentReload:', err);
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   DEDUPLICATE ALL SHEETS
+   Removes duplicate titles from Content_Master and duplicate
+   channels from Live_TV_Channels, then silently reloads so
+   row indices stay accurate.
+════════════════════════════════════════════════════════════ */
+async function deduplicateAll(silent = false) {
+  const btn = silent ? null : document.getElementById('dedup-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Cleaning up…'; }
+
+  try {
+    // Run both sheets in parallel — Content_Master dedupes by title,
+    // Live_TV_Channels dedupes by favorite_team_or_channel.
+    const [r1, r2] = await Promise.all([
+      apiPost({ action: 'removeDuplicates', sheetName: 'Shows' }),
+      apiPost({ action: 'removeDuplicates', sheetName: 'LiveTV' }),
+    ]);
+
+    const removed = (r1.removed || 0) + (r2.removed || 0);
+
+    // If any rows were deleted the row indices are now stale — reload silently.
+    if (removed > 0) await silentReload();
+
+    if (!silent) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Clean Up Duplicates'; }
+      toast(
+        removed > 0
+          ? `Removed ${removed} duplicate${removed === 1 ? '' : 's'} ✓`
+          : 'No duplicates found ✓',
+        'success'
+      );
+      if (removed > 0) renderSettings();
+    }
+  } catch (err) {
+    console.warn('deduplicateAll:', err);
+    if (!silent) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Clean Up Duplicates'; }
+      toast('Cleanup failed — check connection', 'error');
+    }
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
    INIT
 ════════════════════════════════════════════════════════════ */
 (function init() {
@@ -2710,8 +2777,9 @@ const refreshAll = updateAll;
       <div class="big-icon" style="animation:spin 1s linear infinite;display:inline-block">↻</div>
       <p>Loading schedule…</p>
     </div>`;
-  // loadAllData calls renderShows + renderLiveTV which each call renderScheduleTab()
-  loadAllData();
+  // After data loads, silently sweep both sheets for duplicates so the
+  // guide is always clean without requiring manual action.
+  loadAllData().then(() => deduplicateAll(true)).catch(() => {});
 })();
 </script>
 </body>
