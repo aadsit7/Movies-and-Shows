@@ -409,7 +409,7 @@
       font-weight: 700;
       color: #ffffff;
       line-height: 1.25;
-      padding-right: 56px;  /* avoid overlap with refresh btn */
+      padding-right: 112px; /* avoid overlap with refresh + delete btns */
       margin-bottom: 4px;
     }
     .card-meta {
@@ -543,6 +543,28 @@
       from { transform: rotate(0deg); }
       to   { transform: rotate(360deg); }
     }
+
+    .delete-btn {
+      position: absolute;
+      top: 8px;
+      right: 64px;
+      width: 48px;
+      height: 48px;
+      background: #252540;
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      color: #ff6b6b;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background .15s, color .15s;
+      z-index: 2;
+      padding: 0;
+      line-height: 1;
+    }
+    .delete-btn:active { background: #3a1a1a; color: #ff4444; }
 
     /* updating overlay */
     .update-overlay {
@@ -1299,6 +1321,10 @@ async function updateRow(tab, rowIndex, rowData) {
   return apiPost({ action: 'updateRow', sheetName: sheetName(tab), rowIndex, rowData });
 }
 
+async function deleteRow(tab, rowIndex) {
+  return apiPost({ action: 'deleteRow', sheetName: sheetName(tab), rowIndex });
+}
+
 /* ════════════════════════════════════════════════════════════
    TAB SWITCHING
 ════════════════════════════════════════════════════════════ */
@@ -1933,6 +1959,7 @@ function renderCard(raw, tab, idx) {
       ${badgesHtml ? `<div class="badges-row">${badgesHtml}</div>` : ''}
       ${extraHtml}
       ${desc ? `<p class="card-desc">${esc(desc)}</p>` : ''}
+      <button class="delete-btn" onclick="event.stopPropagation(); deleteItem(this)" title="Delete">🗑️</button>
       <button class="refresh-btn" onclick="event.stopPropagation(); refreshCard(this)" title="Refresh from Claude">🔄</button>
     </div>`;
 }
@@ -2116,6 +2143,41 @@ async function refreshCard(btn) {
     overlay.remove();
     btn.classList.remove('spinning');
     toast('Refresh failed - check connection', 'error');
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   DELETE ITEM
+════════════════════════════════════════════════════════════ */
+async function deleteItem(btn) {
+  const card     = btn.closest('.media-card');
+  const tab      = card.dataset.tab;
+  const idx      = parseInt(card.dataset.idx, 10);
+  const rowIndex = parseInt(card.dataset.row, 10);
+
+  const src   = tab === 'movies' ? S.movies : tab === 'shows' ? S.shows : S.livetv;
+  const item  = src[idx];
+  if (!item) return;
+
+  const n     = norm(item);
+  const title = pick(n, 'title', 'favorite_team_or_channel', 'channel') || 'this item';
+
+  if (!confirm(`Delete "${title}" from your library?\n\nThis will also remove it from Google Sheets.`)) return;
+
+  btn.textContent = '⏳';
+  btn.disabled    = true;
+
+  try {
+    const result = await deleteRow(tab, rowIndex);
+    if (result.error) throw new Error(result.error);
+
+    src.splice(idx, 1);
+    renderGrid(tab);
+    toast(`"${title}" removed`, 'success');
+  } catch (err) {
+    btn.textContent = '🗑️';
+    btn.disabled    = false;
+    toast('Delete failed – ' + err.message, 'error');
   }
 }
 
