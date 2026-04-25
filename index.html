@@ -531,6 +531,55 @@
     }
     .search-row input:focus { border-color: var(--accent); }
 
+    /* ── Add-flow (sheet) buttons ─────────────────────────── */
+    .add-search-stack { display: flex; flex-direction: column; gap: 10px; }
+    .add-search-stack input {
+      width: 100%;
+      height: 48px;
+      background: #1a1a2e;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 0 14px;
+      color: var(--text);
+      font-size: 16px;
+      outline: none;
+      -webkit-appearance: none;
+    }
+    .add-search-stack input:focus { border-color: var(--accent); }
+    .btn-add-search {
+      width: 100%;
+      height: 52px;
+      background: #00BFFF;
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-add-search:active { opacity: .85; }
+    .btn-add-search:disabled { opacity: .55; cursor: default; }
+    .btn-add-library {
+      width: 100%;
+      height: 52px;
+      background: var(--success);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 14px;
+    }
+    .btn-add-library:active { opacity: .85; }
+    .btn-add-library:disabled { opacity: .55; cursor: default; }
+    .sheet-error {
+      color: var(--error);
+      font-size: 14px;
+      padding: 14px 0 4px;
+      line-height: 1.45;
+    }
+
     /* ── Preview card ─────────────────────────────────────── */
     .preview-card {
       background: #1e1e1e;
@@ -709,7 +758,8 @@
 <div class="bottom-sheet" id="bottom-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title" id="sheet-title">Quick Add</div>
+    <div class="sheet-title" id="sheet-title">Add to Library</div>
+    <button class="sheet-close" onclick="closeSheet()" aria-label="Close">×</button>
   </div>
   <div class="sheet-body" id="sheet-body"></div>
 </div>
@@ -1472,10 +1522,8 @@ async function confirmAdd(source) {
    QUICK-ADD BOTTOM SHEET
 ════════════════════════════════════════════════════════════ */
 function openSheet() {
-  const tab   = S.tab !== 'settings' ? S.tab : 'movies';
-  const label = { movies: 'Movie', shows: 'Show', livetv: 'Live TV Channel' }[tab] || 'Media';
-  document.getElementById('sheet-title').textContent = `Add ${label}`;
-  renderSheetSearch(tab);
+  document.getElementById('sheet-title').textContent = 'Add to Library';
+  renderSheetSearch();
   document.getElementById('sheet-scrim').classList.add('open');
   document.getElementById('bottom-sheet').classList.add('open');
 }
@@ -1486,47 +1534,180 @@ function closeSheet() {
   S.sheetPreview = null;
 }
 
-function renderSheetSearch(tab) {
+function renderSheetSearch() {
   document.getElementById('sheet-body').innerHTML = `
-    <div class="search-row">
+    <div class="add-search-stack">
       <input type="search" id="sheet-input"
         placeholder="Enter title…"
         autocomplete="off" autocorrect="off" autocapitalize="off"
-        onkeydown="if(event.key==='Enter') doSheetSearch('${tab}')">
-      <button class="btn btn-primary btn-sm" onclick="doSheetSearch('${tab}')">Search</button>
+        onkeydown="if(event.key==='Enter') doSheetSearch()">
+      <button class="btn-add-search" id="sheet-search-btn" onclick="doSheetSearch()">Search</button>
     </div>
-    <div id="result-sheet"></div>`;
+    <div id="result-sheet" style="margin-top:14px"></div>`;
   setTimeout(() => document.getElementById('sheet-input')?.focus(), 320);
 }
 
 function resetSheetSearch() {
   S.sheetPreview = null;
-  const tab = S.tab !== 'settings' ? S.tab : 'movies';
-  renderSheetSearch(tab);
+  renderSheetSearch();
 }
 
-async function doSheetSearch(tab) {
+/* Map a Claude type string to the sheet target name and display label */
+function resolveAddTarget(typeRaw) {
+  const t = String(typeRaw || '').toLowerCase();
+  if (t.includes('show') || t.includes('series')) {
+    return { sheet: 'Shows',  label: 'Show',    cls: 'type-show'   };
+  }
+  if (t.includes('live') || t.includes('channel')) {
+    return { sheet: 'LiveTV', label: 'Live TV', cls: 'type-livetv' };
+  }
+  return   { sheet: 'Movies', label: 'Movie',   cls: 'type-movie'  };
+}
+
+async function doSheetSearch() {
   const input = document.getElementById('sheet-input');
   const query = (input?.value || '').trim();
-  if (!query) return;
-
   const resultEl = document.getElementById('result-sheet');
-  resultEl.innerHTML = `<div class="loading-row"><div class="spinner"></div>Claude is looking this up…</div>`;
-
-  try {
-    const parsed = await claudeSearch(query);
-    if (!parsed || !pick(norm(parsed), 'title')) {
-      resultEl.innerHTML = `<p class="text-muted text-sm" style="padding:16px 0">
-        Couldn't find info for &ldquo;${esc(query)}&rdquo; — try a more specific title.</p>`;
-      return;
-    }
-    S.sheetPreview = parsed;
-    resultEl.innerHTML = renderPreviewCard(parsed, 'sheet');
-  } catch (err) {
-    console.error('doSheetSearch:', err);
-    resultEl.innerHTML = `<p style="color:var(--error);font-size:13px;padding:16px 0">
-      Search failed — please try again.</p>`;
+  if (!query) {
+    resultEl.innerHTML = `<p class="sheet-error">Please enter a title to search.</p>`;
+    input?.focus();
+    return;
   }
+
+  const btn = document.getElementById('sheet-search-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Searching...'; }
+  resultEl.innerHTML = `<div class="loading-row"><div class="spinner"></div>Searching...</div>`;
+
+  let response;
+  try {
+    response = await fetch(APPS_SCRIPT_URL, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ action: 'claudeSearch', query }),
+    });
+  } catch (netErr) {
+    console.error('doSheetSearch network:', netErr);
+    if (btn) { btn.disabled = false; btn.textContent = 'Search'; }
+    resultEl.innerHTML = `<p class="sheet-error">No internet connection — check your network and try again.</p>`;
+    return;
+  }
+
+  if (!response.ok) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Search'; }
+    resultEl.innerHTML = `<p class="sheet-error">Server error (HTTP ${response.status}) — try again in a moment.</p>`;
+    return;
+  }
+
+  let result;
+  try {
+    result = await response.json();
+  } catch (parseErr) {
+    console.error('doSheetSearch parse:', parseErr);
+    if (btn) { btn.disabled = false; btn.textContent = 'Search'; }
+    resultEl.innerHTML = `<p class="sheet-error">Couldn't read server response — please try again.</p>`;
+    return;
+  }
+
+  if (result && result.error) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Search'; }
+    resultEl.innerHTML = `<p class="sheet-error">Search failed — ${esc(result.error)}</p>`;
+    return;
+  }
+
+  const data = result && result.data;
+  if (!data || typeof data !== 'object' || !pick(norm(data), 'title', 'channel', 'favorite_team_or_channel')) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Search'; }
+    resultEl.innerHTML = `<p class="sheet-error">Couldn't find info for "${esc(query)}" — try a more specific title.</p>`;
+    return;
+  }
+
+  S.sheetPreview = data;
+  if (btn) { btn.disabled = false; btn.textContent = 'Search'; }
+  resultEl.innerHTML = renderSheetPreview(data);
+}
+
+function renderSheetPreview(data) {
+  const n         = norm(data);
+  const title     = pick(n, 'title', 'channel', 'favorite_team_or_channel') || 'Untitled';
+  const target    = resolveAddTarget(pick(n, 'type'));
+  const year      = pick(n, 'year', 'year_started');
+  const genre     = pick(n, 'genre', 'genre_primary');
+  const desc      = pick(n, 'description', 'desc');
+  const streaming = pick(n, 'streamingon', 'streaming', 'streamingplatform');
+  const imdb      = pick(n, 'imdbscore', 'imdb', 'imdb_score');
+  const ps        = platformStyle(streaming);
+
+  let badgesHtml = '';
+  if (streaming) badgesHtml += `<span class="platform-badge" style="background:${ps.bg};color:${ps.fg};${ps.border ? 'border:' + ps.border : ''}">${esc(streaming)}</span>`;
+  if (imdb)      badgesHtml += `<span class="imdb-badge">⭐ ${esc(imdb)}</span>`;
+
+  return `
+    <div class="preview-card">
+      <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;margin-bottom:6px">
+        <div class="preview-title" style="flex:1;min-width:0">${esc(title)}</div>
+        <span class="type-badge ${target.cls}">${target.label}</span>
+      </div>
+      <div class="card-meta" style="margin-bottom:8px">
+        ${year  ? `<span class="meta-year">${esc(year)}</span>` : ''}
+        ${year && genre ? `<span class="meta-dot">·</span>` : ''}
+        ${genre ? `<span class="meta-genre">${esc(genre)}</span>` : ''}
+      </div>
+      ${badgesHtml ? `<div class="badges-row">${badgesHtml}</div>` : ''}
+      ${desc ? `<p style="font-size:13px;color:#bbb;line-height:1.55;margin:10px 0 4px">${esc(desc)}</p>` : ''}
+      ${streaming ? `<div class="info-line" style="margin-top:8px">🎞️ <span>${esc(streaming)}</span></div>` : ''}
+      <button class="btn-add-library" id="add-library-btn" onclick="confirmSheetAdd('${target.sheet}')">
+        Add to Library
+      </button>
+    </div>
+    <a class="search-again" onclick="resetSheetSearch()">Search Again</a>`;
+}
+
+async function confirmSheetAdd(sheetTarget) {
+  const data = S.sheetPreview;
+  if (!data) return;
+
+  const btn = document.getElementById('add-library-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
+
+  let response;
+  try {
+    response = await fetch(APPS_SCRIPT_URL, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ action: 'addRow', sheetName: sheetTarget, rowData: data }),
+    });
+  } catch (netErr) {
+    console.error('confirmSheetAdd network:', netErr);
+    if (btn) { btn.disabled = false; btn.textContent = 'Add to Library'; }
+    toast('Add failed — no internet', 'error');
+    return;
+  }
+
+  if (!response.ok) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Add to Library'; }
+    toast(`Add failed — server error ${response.status}`, 'error');
+    return;
+  }
+
+  let result;
+  try {
+    result = await response.json();
+  } catch (parseErr) {
+    console.error('confirmSheetAdd parse:', parseErr);
+    if (btn) { btn.disabled = false; btn.textContent = 'Add to Library'; }
+    toast('Add failed — invalid server response', 'error');
+    return;
+  }
+
+  if (result && result.error) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Add to Library'; }
+    toast(`Add failed — ${result.error}`, 'error');
+    return;
+  }
+
+  closeSheet();
+  toast('Added!', 'success');
+  loadAllData();
 }
 
 /* ════════════════════════════════════════════════════════════
