@@ -2250,11 +2250,13 @@ async function confirmAdd(source) {
       return;
     }
 
-    // update local state
+    // update local state optimistically so the tab grid refreshes immediately
     if (tab === 'movies')      S.movies.push(parsed);
     else if (tab === 'shows')  S.shows.push(parsed);
     else                       S.livetv.push(parsed);
     renderGrid(tab);
+    // show the new item in the schedule straight away (it may have nextAirs)
+    renderScheduleTab();
 
     if (btn) { btn.textContent = 'Added ✓'; }
     toast(`Added to ${tabLabel(tab)}!`, 'success');
@@ -2270,6 +2272,10 @@ async function confirmAdd(source) {
     }
 
     if (source === 'sheet') setTimeout(closeSheet, 1600);
+
+    // reload from sheet in background to get the proper rowIndex for the
+    // new item (needed for future refreshCard / updateAll calls)
+    loadAllData();
   } catch (err) {
     console.error('confirmAdd:', err);
     if (btn) { btn.disabled = false; btn.textContent = 'Add to Library'; }
@@ -2655,6 +2661,8 @@ async function updateAll() {
         await updateRow(tab, rowIdx, parsed);
         // live UX feedback: redraw the grid the user is currently viewing
         if (S.tab === tab) renderGrid(tab);
+        // always keep the schedule in sync as show/live-TV air dates change
+        if (tab === 'shows' || tab === 'livetv') renderScheduleTab();
       }
     } catch (err) {
       errCount++;
