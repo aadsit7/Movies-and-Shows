@@ -1116,32 +1116,105 @@ function showErrorState(tab) {
 }
 
 /* ════════════════════════════════════════════════════════════
+   AIRING-FIRST SORT (Shows tab)
+════════════════════════════════════════════════════════════ */
+function isActiveShowStatus(status) {
+  if (!status) return false;
+  const s = String(status).toLowerCase();
+  return s.includes('return') || s.includes('renew') || s.includes('ongoing') || s.includes('airing');
+}
+
+/* Best-effort parse of a freeform "next airs" string into a timestamp.
+   Returns null if no plausible date is found. */
+function parseAiringDate(text) {
+  if (!text) return null;
+  const t = String(text).trim();
+  const tryParse = (s) => {
+    const d = Date.parse(s);
+    return isNaN(d) ? null : d;
+  };
+
+  let d = tryParse(t);
+  if (d != null) return d;
+
+  const iso = t.match(/\b\d{4}-\d{2}-\d{2}\b/);
+  if (iso) { d = tryParse(iso[0]); if (d != null) return d; }
+
+  const md = t.match(/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,\s*\d{4})?\b/i);
+  if (md) {
+    let s = md[0].replace(/(\d+)(?:st|nd|rd|th)/i, '$1');
+    if (!/\d{4}/.test(s)) s += ', ' + new Date().getFullYear();
+    d = tryParse(s);
+    if (d != null) return d;
+  }
+
+  const dm = t.match(/\b\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*(?:\s+\d{4})?\b/i);
+  if (dm) {
+    let s = dm[0];
+    if (!/\d{4}/.test(s)) s += ' ' + new Date().getFullYear();
+    d = tryParse(s);
+    if (d != null) return d;
+  }
+
+  return null;
+}
+
+function showSortKey(raw) {
+  const n      = norm(raw);
+  const status = pick(n, 'status');
+  const next   = pick(n, 'nextairs', 'nextairing', 'airing', 'airs', 'whenitairs');
+  const active = isActiveShowStatus(status);
+  const tier   = (active && next) ? 0 : active ? 1 : 2;
+  return { tier, date: tier === 0 ? parseAiringDate(next) : null };
+}
+
+function sortShowsByAiring(a, b) {
+  const ka = showSortKey(a);
+  const kb = showSortKey(b);
+  if (ka.tier !== kb.tier) return ka.tier - kb.tier;
+  if (ka.tier === 0) {
+    if (ka.date != null && kb.date != null) return ka.date - kb.date;
+    if (ka.date != null) return -1;
+    if (kb.date != null) return 1;
+  }
+  return 0;
+}
+
+/* ════════════════════════════════════════════════════════════
    GRID RENDERING  (filter + empty state)
 ════════════════════════════════════════════════════════════ */
 function renderGrid(tab) {
   const grid = document.getElementById('grid-' + tab);
   if (!grid) return;
 
-  const src    = tab === 'movies' ? S.movies : tab === 'shows' ? S.shows : S.livetv;
-  const query  = (S.filter[tab] || '').toLowerCase().trim();
+  const src   = tab === 'movies' ? S.movies : tab === 'shows' ? S.shows : S.livetv;
+  const query = (S.filter[tab] || '').toLowerCase().trim();
 
-  const items = query
-    ? src.filter(raw => {
-        const n = norm(raw);
-        const haystack = [
-          pick(n, 'title'),
-          pick(n, 'genre_primary', 'genre'),
-          pick(n, 'streamingon', 'streaming'),
-          pick(n, 'favorite_team_or_channel', 'network'),
-          pick(n, 'league'),
-          pick(n, 'live_tv_type'),
-          pick(n, 'cast'), pick(n, 'director'),
-        ].join(' ').toLowerCase();
-        return haystack.includes(query);
-      })
-    : src;
+  /* Preserve original src indices so card click handlers (openDetailSheet,
+     refreshCard) keep finding the right item after sort/filter. */
+  let entries = src.map((raw, originalIdx) => ({ raw, originalIdx }));
 
-  if (!items.length) {
+  if (query) {
+    entries = entries.filter(({ raw }) => {
+      const n = norm(raw);
+      const haystack = [
+        pick(n, 'title'),
+        pick(n, 'genre_primary', 'genre'),
+        pick(n, 'streamingon', 'streaming'),
+        pick(n, 'favorite_team_or_channel', 'network'),
+        pick(n, 'league'),
+        pick(n, 'live_tv_type'),
+        pick(n, 'cast'), pick(n, 'director'),
+      ].join(' ').toLowerCase();
+      return haystack.includes(query);
+    });
+  }
+
+  if (tab === 'shows') {
+    entries = entries.slice().sort((a, b) => sortShowsByAiring(a.raw, b.raw));
+  }
+
+  if (!entries.length) {
     const icons = { movies: '🎬', shows: '📺', livetv: '📡' };
     grid.innerHTML = `
       <div class="empty-state">
@@ -1153,7 +1226,9 @@ function renderGrid(tab) {
     return;
   }
 
-  grid.innerHTML = items.map((raw, idx) => renderCard(raw, tab, idx)).join('');
+  grid.innerHTML = entries
+    .map(({ raw, originalIdx }) => renderCard(raw, tab, originalIdx))
+    .join('');
 
   // stagger card entrance animations
   grid.querySelectorAll('.media-card').forEach((card, i) => {
