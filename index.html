@@ -1105,7 +1105,7 @@ const S = {
   shows:        [],
   livetv:       [],
   tab:          'movies',
-  filter:       { movies: '', shows: '', livetv: '' },
+  filter:       { movies: '', shows: '', livetv: '', schedule: '' },
   connStatus:   null,   // 'ok' | 'err' | null
   lastSynced:   null,
   refreshingAll:  false,
@@ -1374,14 +1374,16 @@ function renderSubHeader(tab) {
     return;
   }
   if (tab === 'schedule') {
-    const now = new Date();
-    const fmt = d => d.toLocaleDateString([], { month: 'short', day: 'numeric' });
     const updating = S.refreshingAll;
     el.innerHTML = `
-      <div class="sub-header-row" style="align-items:center;gap:8px">
-        <div style="flex:1;min-width:0">
-          <div style="font-size:18px;font-weight:700;line-height:1.2">📅 Upcoming</div>
-          <div style="font-size:12px;color:var(--text-2);margin-top:2px">${fmt(now)} · next 30 days</div>
+      <div class="sub-header-row">
+        <div class="search-wrap">
+          <input type="search" class="filter-input"
+            placeholder="Search schedule…"
+            value="${esc(S.filter.schedule || '')}"
+            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+            oninput="onFilter('schedule', this.value)"
+          >
         </div>
         <button class="update-all-btn"
           id="schedule-refresh-btn"
@@ -1428,7 +1430,8 @@ function renderSubHeader(tab) {
 
 function onFilter(tab, val) {
   S.filter[tab] = val;
-  renderGrid(tab);
+  if (tab === 'schedule') renderScheduleTab();
+  else renderGrid(tab);
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -1755,15 +1758,30 @@ function renderScheduleTab() {
   if (!container) return;
 
   const { days, recurring } = collectThisWeek();
+  const query = (S.filter.schedule || '').toLowerCase().trim();
   const now = new Date();
   const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const MON_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+  function scheduleMatchesQuery(entry) {
+    if (!query) return true;
+    const n = norm(entry.raw);
+    const haystack = [
+      pick(n, 'title', 'favorite_team_or_channel', 'channel'),
+      pick(n, 'streamingon', 'streaming', 'network'),
+      pick(n, 'league'),
+      pick(n, 'genre_primary', 'genre'),
+    ].join(' ').toLowerCase();
+    return haystack.includes(query);
+  }
+
   let html = '';
   // Iterate all 30 days; nearest date sections appear first automatically.
   for (let i = 0; i < 30; i++) {
-    const items = days[i];
-    if (!items || !items.length) continue;
+    const allItems = days[i];
+    if (!allItems || !allItems.length) continue;
+    const items = allItems.filter(scheduleMatchesQuery);
+    if (!items.length) continue;
     const d     = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
     const label = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : DAY_NAMES[d.getDay()];
     const cls   = i === 0 ? 'schedule-today' : i === 1 ? 'schedule-tomorrow' : '';
@@ -1780,26 +1798,31 @@ function renderScheduleTab() {
       </div>`;
   }
 
-  if (recurring.length) {
+  const filteredRecurring = recurring.filter(scheduleMatchesQuery);
+  if (filteredRecurring.length) {
     html += `
       <div class="schedule-day-section">
         <div class="schedule-day-header">
           <span class="schedule-day-label">Recurring</span>
           <span class="schedule-day-date">Weekly schedule</span>
-          <span class="schedule-day-count">${recurring.length}</span>
+          <span class="schedule-day-count">${filteredRecurring.length}</span>
         </div>
         <div class="schedule-items">
-          ${recurring.map(e => renderScheduleItem(e)).join('')}
+          ${filteredRecurring.map(e => renderScheduleItem(e)).join('')}
         </div>
       </div>`;
   }
 
   if (!html) {
-    html = `
-      <div class="empty-state">
-        <div class="big-icon">📅</div>
-        <p>Nothing coming up in the next 30 days.<br>Shows active series and Mariners/Seahawks games only.<br>Tap ↻ Refresh to pull the latest from your sheet, or 🔄 on cards to update air dates.</p>
-      </div>`;
+    html = query
+      ? `<div class="empty-state">
+          <div class="big-icon">📅</div>
+          <p>No results for &ldquo;${esc(query)}&rdquo;</p>
+        </div>`
+      : `<div class="empty-state">
+          <div class="big-icon">📅</div>
+          <p>Nothing coming up in the next 30 days.<br>Shows active series and Mariners/Seahawks games only.<br>Tap ↻ Refresh to pull the latest from your sheet, or 🔄 on cards to update air dates.</p>
+        </div>`;
   }
 
   container.innerHTML = html;
@@ -1866,6 +1889,15 @@ function renderGrid(tab) {
     /* TV guide mode: sort shows and live TV by next air / game date. */
     items = (tab === 'shows' || tab === 'livetv') ? sortByUpcoming(src, tab) : src.slice();
   }
+
+  /* Deduplicate by title as a safety net against sheet-level duplicates slipping through. */
+  const seenTitles = {};
+  items = items.filter(raw => {
+    const key = (pick(norm(raw), 'title', 'favorite_team_or_channel') || '').toLowerCase().trim();
+    if (!key || seenTitles[key]) return false;
+    seenTitles[key] = true;
+    return true;
+  });
 
   if (!items.length) {
     const icons = { movies: '🎬', shows: '📺', livetv: '📡' };
