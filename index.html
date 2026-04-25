@@ -729,6 +729,765 @@ const S = {
   refreshingAll: false,
   sheetPreview: null,   // result object currently shown in sheet/settings
 };
+
+/* ════════════════════════════════════════════════════════════
+   UTILITY HELPERS
+════════════════════════════════════════════════════════════ */
+
+function esc(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/* Normalise a raw sheet row so all keys are lowercase */
+function norm(obj) {
+  if (!obj || typeof obj !== 'object') return {};
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    out[k.toLowerCase().replace(/[_\s]/g, '')] = v;
+  }
+  return out;
+}
+
+/* Pick the first truthy value from a normalised object for a list of key aliases */
+function pick(n, ...keys) {
+  for (const k of keys) {
+    const val = n[k.toLowerCase().replace(/[_\s]/g, '')];
+    if (val != null && val !== '') return String(val);
+  }
+  return '';
+}
+
+/* Attempt to extract a JSON object from a string (Claude sometimes wraps it) */
+function parseMediaResult(raw) {
+  if (!raw) return null;
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    // unwrap common envelope shapes
+    if (raw.result)  return parseMediaResult(raw.result);
+    if (raw.data)    return parseMediaResult(raw.data);
+    if (raw.content) return parseMediaResult(raw.content);
+    return raw;
+  }
+  if (typeof raw === 'string') {
+    // strip markdown code fences if present
+    const stripped = raw.replace(/```(?:json)?\s*/gi, '').replace(/```/g, '').trim();
+    // find outermost { ... }
+    const start = stripped.indexOf('{');
+    const end   = stripped.lastIndexOf('}');
+    if (start !== -1 && end > start) {
+      try { return JSON.parse(stripped.slice(start, end + 1)); } catch (_) {}
+    }
+  }
+  return null;
+}
+
+/* Determine which tab a parsed result belongs to */
+function resultTab(parsed) {
+  const t = (pick(norm(parsed), 'type') || '').toLowerCase();
+  if (t.includes('show') || t.includes('series')) return 'shows';
+  if (t.includes('live') || t.includes('channel') || t.includes('tv channel')) return 'livetv';
+  return 'movies';
+}
+
+/* CSS class for a show status string */
+function statusPillClass(status) {
+  if (!status) return 'pill-upcoming';
+  const s = status.toLowerCase();
+  if (s.includes('return') || s.includes('renew') || s.includes('ongoing') || s.includes('airing')) return 'pill-returning';
+  if (s.includes('end') || s.includes('cancel') || s.includes('complet') || s.includes('final')) return 'pill-ended';
+  return 'pill-upcoming';
+}
+
+/* Map tab key → Google Sheet name */
+function sheetName(tab) {
+  return { movies: 'Movies', shows: 'Shows', livetv: 'LiveTV' }[tab] || 'Movies';
+}
+
+/* Map tab key → display label */
+function tabLabel(tab) {
+  return { movies: 'Movies', shows: 'Shows', livetv: 'Live TV' }[tab] || tab;
+}
+
+/* ════════════════════════════════════════════════════════════
+   TOAST
+════════════════════════════════════════════════════════════ */
+function toast(msg, type = '') {
+  const el = document.createElement('div');
+  el.className = 'toast' + (type ? ' toast-' + type : '');
+  el.textContent = msg;
+  document.getElementById('toast-container').prepend(el);
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('show')));
+  setTimeout(() => {
+    el.classList.remove('show');
+    setTimeout(() => el.remove(), 250);
+  }, 3000);
+}
+
+/* ════════════════════════════════════════════════════════════
+   API
+════════════════════════════════════════════════════════════ */
+async function apiGet(params) {
+  const url = new URL(APPS_SCRIPT_URL);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  const res = await fetch(url.toString());
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+async function apiPost(body) {
+  const res = await fetch(APPS_SCRIPT_URL, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+async function getAllMedia() {
+  return apiGet({ action: 'getAllMedia' });
+}
+
+async function claudeSearch(query, sheet = null) {
+  const body = { action: 'claudeSearch', query };
+  if (sheet) body.sheetName = sheet;
+  const raw = await apiPost(body);
+  return parseMediaResult(raw);
+}
+
+async function addRow(tab, rowData) {
+  return apiPost({ action: 'addRow', sheetName: sheetName(tab), rowData });
+}
+
+async function updateRow(tab, rowIndex, rowData) {
+  return apiPost({ action: 'updateRow', sheetName: sheetName(tab), rowIndex, rowData });
+}
+
+/* ════════════════════════════════════════════════════════════
+   TAB SWITCHING
+════════════════════════════════════════════════════════════ */
+function switchTab(tab) {
+  S.tab = tab;
+
+  // panel visibility
+  document.querySelectorAll('.tab-panel').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+
+  // nav highlight
+  document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById('nav-' + tab).classList.add('active');
+
+  // FAB: hide on settings
+  document.getElementById('fab').classList.toggle('hidden', tab === 'settings');
+
+  // render sub-header
+  renderSubHeader(tab);
+
+  // settings tab: re-render settings pane
+  if (tab === 'settings') {
+    renderSettings();
+    return;
+  }
+
+  // media tabs: load data if grid is empty
+  const grid = document.getElementById('grid-' + tab);
+  if (grid && grid.children.length === 0) loadTabData(tab);
+}
+
+/* ════════════════════════════════════════════════════════════
+   SUB-HEADER (search bar or settings title)
+════════════════════════════════════════════════════════════ */
+function renderSubHeader(tab) {
+  const el = document.getElementById('sub-header');
+  if (tab === 'settings') {
+    el.innerHTML = `<div style="font-size:19px;font-weight:700;padding:2px 0">⚙️ Settings</div>`;
+    return;
+  }
+  const labels = { movies: 'Movies', shows: 'Shows', livetv: 'Live TV' };
+  el.innerHTML = `
+    <div class="search-wrap">
+      <input type="search" class="filter-input"
+        placeholder="Search ${labels[tab] || ''}…"
+        value="${esc(S.filter[tab] || '')}"
+        autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+        oninput="onFilter('${tab}', this.value)"
+      >
+    </div>`;
+}
+
+function onFilter(tab, val) {
+  S.filter[tab] = val;
+  renderGrid(tab);
+}
+
+/* ════════════════════════════════════════════════════════════
+   DATA LOADING
+════════════════════════════════════════════════════════════ */
+async function loadAllData() {
+  ['movies', 'shows', 'livetv'].forEach(t => showSkeletons(t, 5));
+  try {
+    const data     = await getAllMedia();
+    S.movies       = data.Movies  || data.movies  || [];
+    S.shows        = data.Shows   || data.shows   || [];
+    S.livetv       = data.LiveTV  || data.livetv  || data.LiveTv || [];
+    S.lastSynced   = new Date();
+    S.connStatus   = 'ok';
+    ['movies', 'shows', 'livetv'].forEach(t => renderGrid(t));
+  } catch (err) {
+    console.error('loadAllData:', err);
+    S.connStatus = 'err';
+    ['movies', 'shows', 'livetv'].forEach(t => showErrorState(t));
+  }
+}
+
+async function loadTabData(tab) {
+  showSkeletons(tab, 5);
+  try {
+    const data     = await getAllMedia();
+    S.movies       = data.Movies  || data.movies  || [];
+    S.shows        = data.Shows   || data.shows   || [];
+    S.livetv       = data.LiveTV  || data.livetv  || data.LiveTv || [];
+    S.lastSynced   = new Date();
+    S.connStatus   = 'ok';
+    renderGrid(tab);
+  } catch (err) {
+    console.error('loadTabData:', err);
+    S.connStatus = 'err';
+    showErrorState(tab);
+  }
+}
+
+/* ── Skeleton loader ─────────────────────────────────────── */
+function showSkeletons(tab, count) {
+  const grid = document.getElementById('grid-' + tab);
+  if (!grid) return;
+  grid.innerHTML = Array.from({ length: count }, () => `
+    <div class="skeleton-card">
+      <div class="skel skel-title"></div>
+      <div class="skel skel-sub"></div>
+      <div class="skel skel-badge" style="margin:10px 0 6px"></div>
+      <div class="skel skel-desc"></div>
+    </div>`).join('');
+}
+
+/* ── Error state ─────────────────────────────────────────── */
+function showErrorState(tab) {
+  const grid = document.getElementById('grid-' + tab);
+  if (!grid) return;
+  grid.innerHTML = `
+    <div class="error-state">
+      <div class="big-icon">⚠️</div>
+      <h3>Couldn't load content</h3>
+      <p>Check your connection and sheet setup.</p>
+      <button class="btn btn-secondary btn-sm" style="margin-top:14px"
+        onclick="loadTabData('${tab}')">Try Again</button>
+    </div>`;
+}
+
+/* ════════════════════════════════════════════════════════════
+   GRID RENDERING  (filter + empty state)
+════════════════════════════════════════════════════════════ */
+function renderGrid(tab) {
+  const grid = document.getElementById('grid-' + tab);
+  if (!grid) return;
+
+  const src    = tab === 'movies' ? S.movies : tab === 'shows' ? S.shows : S.livetv;
+  const query  = (S.filter[tab] || '').toLowerCase().trim();
+
+  const items = query
+    ? src.filter(raw => {
+        const n = norm(raw);
+        const haystack = [
+          pick(n, 'title'), pick(n, 'genre'),
+          pick(n, 'streamingon', 'streaming'), pick(n, 'network'),
+          pick(n, 'cast'), pick(n, 'director'),
+        ].join(' ').toLowerCase();
+        return haystack.includes(query);
+      })
+    : src;
+
+  if (!items.length) {
+    const icons = { movies: '🎬', shows: '📺', livetv: '📡' };
+    grid.innerHTML = `
+      <div class="empty-state">
+        <div class="big-icon">${icons[tab]}</div>
+        <p>${query
+          ? `No results for &ldquo;${esc(query)}&rdquo;`
+          : 'Nothing here yet — tap <strong>+</strong> to add!'}</p>
+      </div>`;
+    return;
+  }
+
+  grid.innerHTML = items.map((raw, idx) => renderCard(raw, tab, idx)).join('');
+
+  // stagger card entrance animations
+  grid.querySelectorAll('.media-card').forEach((card, i) => {
+    card.style.animationDelay = (i * 0.045) + 's';
+  });
+}
+
+/* ════════════════════════════════════════════════════════════
+   CARD RENDERING
+════════════════════════════════════════════════════════════ */
+function renderCard(raw, tab, idx) {
+  const n  = norm(raw);
+  const title       = pick(n, 'title');
+  const year        = pick(n, 'year');
+  const genre       = pick(n, 'genre');
+  const rating      = pick(n, 'rating');
+  const imdb        = pick(n, 'imdbscore', 'imdb', 'imdb_score');
+  const desc        = pick(n, 'description', 'desc');
+  const streaming   = pick(n, 'streamingon', 'streaming', 'streamingplatform');
+  const rowIndex    = pick(n, 'rowindex', 'row', 'rownum') || String(idx + 2);
+  const ps          = platformStyle(streaming);
+
+  let badgesHtml = '';
+  if (streaming) badgesHtml += `<span class="platform-badge" style="background:${ps.bg};color:${ps.fg};${ps.border ? 'border:' + ps.border : ''}">${esc(streaming)}</span>`;
+  if (rating)    badgesHtml += `<span class="rating-badge">${esc(rating)}</span>`;
+  if (imdb)      badgesHtml += `<span class="imdb-badge">⭐ ${esc(imdb)}</span>`;
+
+  let extraHtml = '';
+
+  if (tab === 'movies') {
+    const director = pick(n, 'director');
+    const cast     = pick(n, 'cast');
+    if (director) extraHtml += `<div class="info-line">🎥 <span>${esc(director)}</span></div>`;
+    if (cast)     extraHtml += `<div class="info-line">👥 <span>${esc(cast)}</span></div>`;
+  }
+
+  if (tab === 'shows') {
+    const seasons = pick(n, 'seasons', 'season', 'numseasons');
+    const latest  = pick(n, 'latestepisode', 'latestep', 'episode', 'latestepisodename');
+    const status  = pick(n, 'status');
+    const network = pick(n, 'network');
+    const cast    = pick(n, 'cast');
+
+    if (seasons || status) {
+      extraHtml += `<div class="badges-row" style="margin-top:6px">`;
+      if (seasons) extraHtml += `<span class="rating-badge">${esc(seasons)}</span>`;
+      if (status)  extraHtml += `<span class="status-pill ${statusPillClass(status)}">${esc(status)}</span>`;
+      extraHtml += `</div>`;
+    }
+    if (latest) {
+      extraHtml += `
+        <div class="ep-block">
+          <div class="ep-label">Latest Episode</div>
+          <div class="ep-value">${esc(latest)}</div>
+        </div>`;
+    }
+    if (network) extraHtml += `<div class="info-line">📡 <span>${esc(network)}</span></div>`;
+    if (cast)    extraHtml += `<div class="info-line">👥 <span>${esc(cast)}</span></div>`;
+  }
+
+  if (tab === 'livetv') {
+    const channel = pick(n, 'channel');
+    const network = pick(n, 'network');
+    if (channel) extraHtml += `<div class="info-line">📺 Channel: <span>${esc(channel)}</span></div>`;
+    if (network) extraHtml += `<div class="info-line">🏢 Network: <span>${esc(network)}</span></div>`;
+  }
+
+  return `
+    <div class="media-card" data-tab="${tab}" data-idx="${idx}" data-row="${esc(rowIndex)}">
+      <div class="card-title">${esc(title)}</div>
+      <div class="card-meta">
+        ${year  ? `<span class="meta-year">${esc(year)}</span>` : ''}
+        ${year && genre ? `<span class="meta-dot">·</span>` : ''}
+        ${genre ? `<span class="meta-genre">${esc(genre)}</span>` : ''}
+      </div>
+      ${badgesHtml ? `<div class="badges-row">${badgesHtml}</div>` : ''}
+      ${extraHtml}
+      ${desc ? `<p class="card-desc" onclick="this.classList.toggle('expanded')">${esc(desc)}</p>` : ''}
+      <button class="refresh-btn" onclick="refreshCard(this)" title="Refresh from Claude">🔄</button>
+    </div>`;
+}
+
+/* ════════════════════════════════════════════════════════════
+   CARD REFRESH
+════════════════════════════════════════════════════════════ */
+async function refreshCard(btn) {
+  const card     = btn.closest('.media-card');
+  const tab      = card.dataset.tab;
+  const idx      = parseInt(card.dataset.idx, 10);
+  const rowIndex = parseInt(card.dataset.row, 10) || idx + 2;
+  const src      = tab === 'movies' ? S.movies : tab === 'shows' ? S.shows : S.livetv;
+  const raw      = src[idx];
+  if (!raw) return;
+
+  const title = pick(norm(raw), 'title') || 'this title';
+
+  // overlay + spin
+  const overlay = document.createElement('div');
+  overlay.className = 'update-overlay';
+  overlay.innerHTML = `<div class="spinner spinner-sm"></div><span>Updating…</span>`;
+  card.appendChild(overlay);
+  btn.classList.add('spinning');
+
+  try {
+    let query = `REFRESH: ${title} — get latest season, latest episode title and number, current streaming platform as of 2026, updated IMDB score`;
+    if (tab === 'shows') {
+      query += '. Return JSON with fields: type, title, year, genre, rating, description, network, seasons, latestEpisode, status, cast, streamingOn, imdbScore';
+    }
+
+    const parsed = await claudeSearch(query, sheetName(tab));
+    if (!parsed) throw new Error('no result');
+
+    // merge into state
+    src[idx] = { ...raw, ...parsed };
+
+    // write back to sheet
+    await updateRow(tab, rowIndex, src[idx]);
+
+    // replace card in DOM
+    const newHtml  = renderCard(src[idx], tab, idx);
+    const tmp      = document.createElement('div');
+    tmp.innerHTML  = newHtml;
+    const newCard  = tmp.firstElementChild;
+    newCard.style.animationDelay = '0s';
+    card.replaceWith(newCard);
+
+    toast('Updated ✓', 'success');
+  } catch (err) {
+    console.error('refreshCard:', err);
+    overlay.remove();
+    btn.classList.remove('spinning');
+    toast('Update failed — try again', 'error');
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   PREVIEW CARD (shared by quick-add sheet + settings)
+════════════════════════════════════════════════════════════ */
+function renderPreviewCard(parsed, source) {
+  const n           = norm(parsed);
+  const title       = pick(n, 'title');
+  const year        = pick(n, 'year');
+  const genre       = pick(n, 'genre');
+  const rating      = pick(n, 'rating');
+  const imdb        = pick(n, 'imdbscore', 'imdb');
+  const desc        = pick(n, 'description', 'desc');
+  const streaming   = pick(n, 'streamingon', 'streaming');
+  const director    = pick(n, 'director');
+  const cast        = pick(n, 'cast');
+  const seasons     = pick(n, 'seasons', 'season');
+  const latest      = pick(n, 'latestepisode', 'latestep', 'episode');
+  const status      = pick(n, 'status');
+  const typeRaw     = pick(n, 'type');
+  const tab         = resultTab(parsed);
+  const ps          = platformStyle(streaming);
+  const typeClass   = tab === 'movies' ? 'type-movie' : tab === 'shows' ? 'type-show' : 'type-livetv';
+  const typeLabel   = tab === 'movies' ? 'Movie' : tab === 'shows' ? 'Show' : 'Live TV';
+
+  let badgesHtml = '';
+  if (streaming) badgesHtml += `<span class="platform-badge" style="background:${ps.bg};color:${ps.fg};${ps.border ? 'border:' + ps.border : ''}">${esc(streaming)}</span>`;
+  if (rating)    badgesHtml += `<span class="rating-badge">${esc(rating)}</span>`;
+  if (imdb)      badgesHtml += `<span class="imdb-badge">⭐ ${esc(imdb)}</span>`;
+
+  return `
+    <div class="preview-card">
+      <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;margin-bottom:6px">
+        <div class="preview-title" style="flex:1;min-width:0">${esc(title)}</div>
+        <span class="type-badge ${typeClass}">${typeLabel}</span>
+      </div>
+      <div class="card-meta" style="margin-bottom:8px">
+        ${year  ? `<span class="meta-year">${esc(year)}</span>` : ''}
+        ${year && genre ? `<span class="meta-dot">·</span>` : ''}
+        ${genre ? `<span class="meta-genre">${esc(genre)}</span>` : ''}
+      </div>
+      ${badgesHtml ? `<div class="badges-row">${badgesHtml}</div>` : ''}
+      ${desc ? `<p style="font-size:13px;color:#999;line-height:1.5;margin:8px 0">${esc(desc)}</p>` : ''}
+      ${director ? `<div class="info-line">🎥 <span>${esc(director)}</span></div>` : ''}
+      ${cast     ? `<div class="info-line">👥 <span>${esc(cast)}</span></div>` : ''}
+      ${seasons  ? `<div class="info-line">📅 <span>${esc(seasons)}${status ? '  ·  ' + esc(status) : ''}</span></div>` : ''}
+      ${latest   ? `<div class="ep-block"><div class="ep-label">Latest Episode</div><div class="ep-value">${esc(latest)}</div></div>` : ''}
+      <button class="btn btn-primary btn-full" id="add-btn-${source}"
+        onclick="confirmAdd('${source}')" style="margin-top:14px">
+        Add to Library
+      </button>
+    </div>`;
+}
+
+async function confirmAdd(source) {
+  const parsed = S.sheetPreview;
+  if (!parsed) return;
+
+  const btn = document.getElementById('add-btn-' + source);
+  if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
+
+  try {
+    const tab = resultTab(parsed);
+    await addRow(tab, parsed);
+
+    // update local state
+    if (tab === 'movies')      S.movies.push(parsed);
+    else if (tab === 'shows')  S.shows.push(parsed);
+    else                       S.livetv.push(parsed);
+    renderGrid(tab);
+
+    if (btn) { btn.textContent = 'Added ✓'; }
+    toast(`Added to ${tabLabel(tab)}!`, 'success');
+
+    // show search-again link
+    const resultEl = document.getElementById('result-' + source);
+    if (resultEl) {
+      const link = document.createElement('a');
+      link.className = 'search-again';
+      link.textContent = 'Search Again';
+      link.onclick = () => source === 'sheet' ? resetSheetSearch() : resetSettingsSearch();
+      resultEl.appendChild(link);
+    }
+
+    if (source === 'sheet') setTimeout(closeSheet, 1600);
+  } catch (err) {
+    console.error('confirmAdd:', err);
+    if (btn) { btn.disabled = false; btn.textContent = 'Add to Library'; }
+    toast('Failed to add — try again', 'error');
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   QUICK-ADD BOTTOM SHEET
+════════════════════════════════════════════════════════════ */
+function openSheet() {
+  const tab   = S.tab !== 'settings' ? S.tab : 'movies';
+  const label = { movies: 'Movie', shows: 'Show', livetv: 'Live TV Channel' }[tab] || 'Media';
+  document.getElementById('sheet-title').textContent = `Add ${label}`;
+  renderSheetSearch(tab);
+  document.getElementById('sheet-scrim').classList.add('open');
+  document.getElementById('bottom-sheet').classList.add('open');
+}
+
+function closeSheet() {
+  document.getElementById('sheet-scrim').classList.remove('open');
+  document.getElementById('bottom-sheet').classList.remove('open');
+  S.sheetPreview = null;
+}
+
+function renderSheetSearch(tab) {
+  document.getElementById('sheet-body').innerHTML = `
+    <div class="search-row">
+      <input type="search" id="sheet-input"
+        placeholder="Enter title…"
+        autocomplete="off" autocorrect="off" autocapitalize="off"
+        onkeydown="if(event.key==='Enter') doSheetSearch('${tab}')">
+      <button class="btn btn-primary btn-sm" onclick="doSheetSearch('${tab}')">Search</button>
+    </div>
+    <div id="result-sheet"></div>`;
+  setTimeout(() => document.getElementById('sheet-input')?.focus(), 320);
+}
+
+function resetSheetSearch() {
+  S.sheetPreview = null;
+  const tab = S.tab !== 'settings' ? S.tab : 'movies';
+  renderSheetSearch(tab);
+}
+
+async function doSheetSearch(tab) {
+  const input = document.getElementById('sheet-input');
+  const query = (input?.value || '').trim();
+  if (!query) return;
+
+  const resultEl = document.getElementById('result-sheet');
+  resultEl.innerHTML = `<div class="loading-row"><div class="spinner"></div>Claude is looking this up…</div>`;
+
+  try {
+    const parsed = await claudeSearch(query);
+    if (!parsed || !pick(norm(parsed), 'title')) {
+      resultEl.innerHTML = `<p class="text-muted text-sm" style="padding:16px 0">
+        Couldn't find info for &ldquo;${esc(query)}&rdquo; — try a more specific title.</p>`;
+      return;
+    }
+    S.sheetPreview = parsed;
+    resultEl.innerHTML = renderPreviewCard(parsed, 'sheet');
+  } catch (err) {
+    console.error('doSheetSearch:', err);
+    resultEl.innerHTML = `<p style="color:var(--error);font-size:13px;padding:16px 0">
+      Search failed — please try again.</p>`;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   SETTINGS
+════════════════════════════════════════════════════════════ */
+function renderSettings() {
+  const synced    = S.lastSynced
+    ? S.lastSynced.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : 'Never';
+  const dotClass  = S.connStatus === 'ok' ? 'dot-green' : S.connStatus === 'err' ? 'dot-red' : 'dot-grey';
+  const connLabel = S.connStatus === 'ok' ? 'Connected' : S.connStatus === 'err' ? 'Error' : 'Unknown';
+  const total     = S.movies.length + S.shows.length + S.livetv.length;
+
+  document.getElementById('settings-body').innerHTML = `
+    <div class="settings-wrap">
+
+      <!-- Discovery -->
+      <div>
+        <div class="discovery-intro">
+          <h2>Find Something New</h2>
+          <p>Search for any movie, show, or channel to add to your library</p>
+        </div>
+        <div class="search-row">
+          <input type="search" id="settings-input"
+            placeholder="e.g. Severance, Interstellar…"
+            autocomplete="off" autocorrect="off" autocapitalize="off"
+            onkeydown="if(event.key==='Enter') doSettingsSearch()">
+          <button class="btn btn-primary btn-sm" onclick="doSettingsSearch()">Search</button>
+        </div>
+        <div id="result-settings"></div>
+      </div>
+
+      <!-- App info -->
+      <div>
+        <div class="section-label">App Info</div>
+        <div class="settings-card">
+          <div class="settings-row">
+            <span class="sr-label">Family Media Tracker</span>
+            <span class="sr-value">v${APP_VERSION}</span>
+          </div>
+          <div class="settings-row">
+            <span class="sr-label">Sheet Connection</span>
+            <span class="sr-value">
+              <span class="status-dot ${dotClass}"></span>${connLabel}
+            </span>
+          </div>
+          <div class="settings-row">
+            <span class="sr-label">Last Synced</span>
+            <span class="sr-value">${synced}</span>
+          </div>
+          <div class="settings-row">
+            <span class="sr-label">Library Size</span>
+            <span class="sr-value">${total} items
+              (${S.movies.length}M · ${S.shows.length}S · ${S.livetv.length}TV)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div>
+        <div class="section-label">Actions</div>
+        <div class="settings-card">
+          <div class="settings-row col">
+            <span class="sr-label">Refresh All Media</span>
+            <span class="sr-sub">Re-fetch every item via Claude AI</span>
+            <button class="btn btn-primary btn-full btn-sm" id="refresh-all-btn"
+              onclick="refreshAll()" style="margin-top:4px">
+              Refresh All (${total} items)
+            </button>
+            <div id="refresh-all-progress" style="display:none;font-size:12px;color:var(--text-2);margin-top:4px"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>`;
+}
+
+async function doSettingsSearch() {
+  const input = document.getElementById('settings-input');
+  const query = (input?.value || '').trim();
+  if (!query) return;
+
+  const resultEl = document.getElementById('result-settings');
+  resultEl.innerHTML = `<div class="loading-row"><div class="spinner"></div>Claude is looking this up…</div>`;
+
+  try {
+    const parsed = await claudeSearch(query);
+    if (!parsed || !pick(norm(parsed), 'title')) {
+      resultEl.innerHTML = `<p class="text-muted text-sm" style="padding:16px 0">
+        Couldn't find info for &ldquo;${esc(query)}&rdquo; — try a more specific title.</p>`;
+      return;
+    }
+    S.sheetPreview = parsed;
+    resultEl.innerHTML = renderPreviewCard(parsed, 'settings');
+  } catch (err) {
+    console.error('doSettingsSearch:', err);
+    resultEl.innerHTML = `<p style="color:var(--error);font-size:13px;padding:16px 0">
+      Search failed — please try again.</p>`;
+  }
+}
+
+function resetSettingsSearch() {
+  S.sheetPreview = null;
+  const input = document.getElementById('settings-input');
+  if (input) { input.value = ''; input.focus(); }
+  const resultEl = document.getElementById('result-settings');
+  if (resultEl) resultEl.innerHTML = '';
+}
+
+/* ════════════════════════════════════════════════════════════
+   REFRESH ALL
+════════════════════════════════════════════════════════════ */
+async function refreshAll() {
+  if (S.refreshingAll) return;
+  S.refreshingAll = true;
+
+  const btn      = document.getElementById('refresh-all-btn');
+  const progress = document.getElementById('refresh-all-progress');
+  if (btn) btn.disabled = true;
+  if (progress) { progress.style.display = 'block'; progress.textContent = 'Starting…'; }
+
+  const queue = [
+    ...S.movies.map((item, i) => ({ item, tab: 'movies', idx: i })),
+    ...S.shows.map((item, i)  => ({ item, tab: 'shows',  idx: i })),
+    ...S.livetv.map((item, i) => ({ item, tab: 'livetv', idx: i })),
+  ];
+
+  const total  = queue.length;
+  let done     = 0;
+  let errCount = 0;
+
+  for (const { item, tab, idx } of queue) {
+    done++;
+    const title   = pick(norm(item), 'title') || '?';
+    const rowIdx  = parseInt(pick(norm(item), 'rowindex', 'row') || String(idx + 2), 10);
+    if (progress) progress.textContent = `Updating ${done} of ${total}: ${title}…`;
+
+    try {
+      let query = `REFRESH: ${title} — get latest season, latest episode title and number, current streaming platform as of 2026, updated IMDB score`;
+      if (tab === 'shows') {
+        query += '. Return JSON with: type, title, year, genre, rating, description, network, seasons, latestEpisode, status, cast, streamingOn, imdbScore';
+      }
+      const parsed = await claudeSearch(query, sheetName(tab));
+      if (parsed) {
+        const src  = tab === 'movies' ? S.movies : tab === 'shows' ? S.shows : S.livetv;
+        src[idx]   = { ...item, ...parsed };
+        await updateRow(tab, rowIdx, src[idx]);
+      }
+    } catch (err) {
+      errCount++;
+      console.error(`refreshAll [${title}]:`, err);
+    }
+
+    // brief pause to avoid hammering the Apps Script quota
+    await new Promise(r => setTimeout(r, 400));
+  }
+
+  // re-render all grids with fresh data
+  ['movies', 'shows', 'livetv'].forEach(t => renderGrid(t));
+
+  S.lastSynced    = new Date();
+  S.refreshingAll = false;
+
+  const summary = errCount
+    ? `Done — ${total - errCount}/${total} updated (${errCount} failed)`
+    : `Done — all ${total} items updated ✓`;
+
+  if (progress) progress.textContent = summary;
+  if (btn) { btn.disabled = false; btn.textContent = `Refresh All (${total} items)`; }
+
+  toast(summary, errCount ? '' : 'success');
+  renderSettings(); // refresh last-synced timestamp
+}
+
+/* ════════════════════════════════════════════════════════════
+   INIT
+════════════════════════════════════════════════════════════ */
+(function init() {
+  renderSubHeader('movies');
+  loadAllData();
+})();
 </script>
 </body>
 </html>
