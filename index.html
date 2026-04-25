@@ -951,7 +951,7 @@
   <!-- Scrollable content -->
   <div id="content">
     <!-- Movies tab -->
-    <div id="tab-movies" class="tab-panel active">
+    <div id="tab-movies" class="tab-panel">
       <div class="cards-grid" id="grid-movies"></div>
     </div>
 
@@ -968,7 +968,7 @@
     </div>
 
     <!-- Schedule tab -->
-    <div id="tab-schedule" class="tab-panel">
+    <div id="tab-schedule" class="tab-panel active">
       <div id="schedule-body"></div>
     </div>
 
@@ -980,7 +980,7 @@
 
   <!-- Bottom navigation -->
   <nav id="bottom-nav">
-    <button class="nav-btn active" id="nav-movies"  onclick="switchTab('movies')">
+    <button class="nav-btn"        id="nav-movies"  onclick="switchTab('movies')">
       <span class="nav-icon">🎬</span>Movies
     </button>
     <button class="nav-btn"        id="nav-shows"   onclick="switchTab('shows')">
@@ -989,7 +989,7 @@
     <button class="nav-btn"        id="nav-livetv"  onclick="switchTab('livetv')">
       <span class="nav-icon">📡</span>Live TV
     </button>
-    <button class="nav-btn"        id="nav-schedule" onclick="switchTab('schedule')">
+    <button class="nav-btn active"  id="nav-schedule" onclick="switchTab('schedule')">
       <span class="nav-icon">📅</span>Schedule
     </button>
     <button class="nav-btn"        id="nav-settings" onclick="switchTab('settings')">
@@ -999,7 +999,7 @@
 </div>
 
 <!-- Floating + button -->
-<button id="fab" onclick="openSheet()">+</button>
+<button id="fab" class="hidden" onclick="openSheet()">+</button>
 
 <!-- Bottom sheet scrim -->
 <div class="sheet-scrim" id="sheet-scrim" onclick="closeSheet()"></div>
@@ -2602,7 +2602,17 @@ const refreshAll = updateAll;
    INIT
 ════════════════════════════════════════════════════════════ */
 (function init() {
-  renderSubHeader('movies');
+  // Schedule is the default landing tab
+  S.tab = 'schedule';
+  renderSubHeader('schedule');
+  // Show loading spinner immediately while data fetches
+  const schedBody = document.getElementById('schedule-body');
+  if (schedBody) schedBody.innerHTML = `
+    <div class="empty-state">
+      <div class="big-icon" style="animation:spin 1s linear infinite;display:inline-block">↻</div>
+      <p>Loading schedule…</p>
+    </div>`;
+  // loadAllData calls renderShows + renderLiveTV which each call renderScheduleTab()
   loadAllData();
 })();
 </script>
