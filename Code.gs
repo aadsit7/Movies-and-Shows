@@ -108,8 +108,14 @@ function fetchAllMediaFromSheet() {
   var shows   = [];
   var liveTV  = [];
 
-  /* Content_Master → split by content_type, dedup by title */
+  /* Ensure all expected columns exist on both sheets so next_airs / next_game
+     are never silently dropped, even before the first write. */
   var contentSheet = ss.getSheetByName(CONTENT_MASTER);
+  var liveSheet    = ss.getSheetByName(LIVE_TV_SHEET);
+  if (contentSheet) ensureColumns(contentSheet, CONTENT_FIELDS);
+  if (liveSheet)    ensureColumns(liveSheet,    LIVE_TV_FIELDS);
+
+  /* Content_Master → split by content_type, dedup by title */
   if (contentSheet) {
     var rawData = contentSheet.getDataRange().getValues();
     if (rawData.length > 1) {
@@ -131,7 +137,6 @@ function fetchAllMediaFromSheet() {
   }
 
   /* Live_TV_Channels — dedup by favorite_team_or_channel */
-  var liveSheet = ss.getSheetByName(LIVE_TV_SHEET);
   if (liveSheet) {
     var liveRaw = liveSheet.getDataRange().getValues();
     if (liveRaw.length > 1) {

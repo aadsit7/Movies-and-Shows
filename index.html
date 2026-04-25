@@ -1351,10 +1351,11 @@ function switchTab(tab) {
     return;
   }
 
-  // schedule tab: render weekly view (load data first if needed)
+  // schedule tab: always pull fresh data from the sheet so the guide
+  // reflects the source of truth, then render.
   if (tab === 'schedule') {
-    if (S.shows.length === 0 && S.livetv.length === 0) loadTabData('schedule');
-    else renderScheduleTab();
+    renderScheduleTab();           // show what we have immediately
+    loadAllData();                 // then fetch latest from sheet in background
     return;
   }
 
@@ -1374,21 +1375,27 @@ function renderSubHeader(tab) {
   }
   if (tab === 'schedule') {
     const now = new Date();
-    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 6);
     const fmt = d => d.toLocaleDateString([], { month: 'short', day: 'numeric' });
     const updating = S.refreshingAll;
     el.innerHTML = `
-      <div class="sub-header-row" style="align-items:center">
-        <div style="flex:1">
-          <div style="font-size:18px;font-weight:700;line-height:1.2">📅 This Week</div>
-          <div style="font-size:12px;color:var(--text-2);margin-top:2px">${fmt(now)} – ${fmt(end)}</div>
+      <div class="sub-header-row" style="align-items:center;gap:8px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:18px;font-weight:700;line-height:1.2">📅 Upcoming</div>
+          <div style="font-size:12px;color:var(--text-2);margin-top:2px">${fmt(now)} · next 30 days</div>
         </div>
+        <button class="update-all-btn"
+          id="schedule-refresh-btn"
+          onclick="refreshScheduleFromSheet()"
+          title="Pull latest air dates from Google Sheet">
+          <span class="ua-icon">↻</span>
+          <span>Refresh</span>
+        </button>
         <button id="sub-update-all-btn"
           class="update-all-btn${updating ? ' updating' : ''}"
           ${updating ? 'disabled' : ''}
           onclick="updateAll()"
-          title="Refresh all air dates from Claude">
-          <span class="ua-icon">↻</span>
+          title="Re-fetch all air dates from Claude and save to sheet">
+          <span class="ua-icon">✦</span>
           <span>Update All</span>
           <span id="sub-update-all-count" class="ua-count">${updating && S.updateProgress ? S.updateProgress : ''}</span>
         </button>
@@ -1644,11 +1651,10 @@ function collectThisWeek() {
   const days = {};     // diffDays (0-6) → array of entries
   const recurring = [];
 
-  /* Shows (active only) + Movies (new-release with a next_airs date) +
-     Live TV (Mariners / Seahawks only) */
+  /* Shows (active only) + Live TV (Mariners / Seahawks only).
+     Movies are excluded — the schedule is a TV guide, not a release calendar. */
   [
     { tab: 'shows',  items: S.shows  },
-    { tab: 'movies', items: S.movies },
     { tab: 'livetv', items: S.livetv }
   ].forEach(({ tab, items }) => {
     items.forEach((raw, idx) => {
@@ -1667,12 +1673,13 @@ function collectThisWeek() {
       if (date) {
         const startOfTarget = new Date(date.getFullYear(), date.getMonth(), date.getDate());
         const diff = Math.round((startOfTarget - startOfToday) / 86400000);
-        if (diff >= 0 && diff < 7) {
+        /* Show upcoming items up to 30 days out, sorted nearest-first */
+        if (diff >= 0 && diff < 30) {
           if (!days[diff]) days[diff] = [];
           days[diff].push({ raw, idx, text, date, tab });
         }
-      } else if (tab !== 'movies' && dayOfWeekHint(text)) {
-        /* Recurring weekly slots (shows / live TV only — movies don't recur) */
+      } else if (dayOfWeekHint(text)) {
+        /* Recurring weekly slots (day-of-week hints like "Tuesdays at 9pm") */
         recurring.push({ raw, idx, text, date: null, tab });
       }
     });
@@ -1727,6 +1734,22 @@ function renderScheduleItem(entry) {
     </div>`;
 }
 
+/* Pull the latest data from Google Sheet and re-render the schedule.
+   This is the fast refresh (no Claude calls) — just reads the sheet. */
+async function refreshScheduleFromSheet() {
+  const btn = document.getElementById('schedule-refresh-btn');
+  if (btn) { btn.disabled = true; btn.querySelector('.ua-icon').style.animation = 'spin 0.8s linear infinite'; }
+
+  try {
+    await loadAllData();
+  } catch (err) {
+    console.warn('refreshScheduleFromSheet:', err);
+    toast('Refresh failed — check connection', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.querySelector('.ua-icon').style.animation = ''; }
+  }
+}
+
 function renderScheduleTab() {
   const container = document.getElementById('schedule-body');
   if (!container) return;
@@ -1737,7 +1760,8 @@ function renderScheduleTab() {
   const MON_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
   let html = '';
-  for (let i = 0; i < 7; i++) {
+  // Iterate all 30 days; nearest date sections appear first automatically.
+  for (let i = 0; i < 30; i++) {
     const items = days[i];
     if (!items || !items.length) continue;
     const d     = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
@@ -1774,7 +1798,7 @@ function renderScheduleTab() {
     html = `
       <div class="empty-state">
         <div class="big-icon">📅</div>
-        <p>Nothing scheduled this week.<br>Shows active series, new-release movies, and Mariners/Seahawks games only.<br>Tap 🔄 on cards to refresh air dates.</p>
+        <p>Nothing coming up in the next 30 days.<br>Shows active series and Mariners/Seahawks games only.<br>Tap ↻ Refresh to pull the latest from your sheet, or 🔄 on cards to update air dates.</p>
       </div>`;
   }
 
