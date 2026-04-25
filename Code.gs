@@ -313,7 +313,7 @@ function mapToSheetRow(data, kind) {
       genre:         firstOf(data, ['genre']),
       description:   firstOf(data, ['description']),
       streaming_on:  firstOf(data, ['streamingOn', 'streaming_on']),
-      next_game:     firstOf(data, ['nextGame', 'next_game']),
+      next_game:     firstOf(data, ['nextGame', 'next_game', 'nextAirs', 'next_airs']),
       tv_channel:    firstOf(data, ['tvChannel', 'tv_channel'])
     };
   }
@@ -336,7 +336,7 @@ function mapToSheetRow(data, kind) {
     network:        firstOf(data, ['network']),
     status:         firstOf(data, ['status']),
     latest_episode: firstOf(data, ['latestEpisode', 'latest_episode']),
-    next_airs:      firstOf(data, ['nextAirs', 'next_airs', 'nextAiring'])
+    next_airs:      firstOf(data, ['nextAirs', 'next_airs', 'nextAiring', 'airing', 'whenitairs'])
   };
 }
 
@@ -572,7 +572,9 @@ function respondJson(obj) {
 }
 
 function normalizeHeaders(headerRow) {
-  return headerRow.map(function(h) { return String(h).trim(); });
+  return headerRow.map(function(h) {
+    return String(h).trim().toLowerCase().replace(/\s+/g, '_');
+  });
 }
 
 function buildObj(headers, rowValues) {
