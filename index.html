@@ -148,6 +148,130 @@
       gap: 12px;
     }
 
+    /* ── Upcoming rail ────────────────────────────────────── */
+    .upcoming-section { margin-bottom: 14px; }
+    .upcoming-section:empty { display: none; }
+    .upcoming-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: var(--text-2);
+      margin: 4px 2px 8px;
+    }
+    .upcoming-heading-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .upcoming-count {
+      background: var(--accent-dim);
+      color: var(--accent);
+      padding: 2px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      letter-spacing: .3px;
+    }
+    .upcoming-rail {
+      display: flex;
+      gap: 10px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scroll-snap-type: x mandatory;
+      padding: 2px 14px 8px;
+      margin: 0 -14px;
+      scrollbar-width: none;
+    }
+    .upcoming-rail::-webkit-scrollbar { display: none; }
+    .upcoming-card {
+      flex: 0 0 220px;
+      scroll-snap-align: start;
+      background: linear-gradient(135deg, rgba(0,191,255,.10), rgba(26,26,46,.95));
+      border: 1px solid rgba(0,191,255,.30);
+      border-radius: 14px;
+      padding: 12px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: transform .15s, border-color .15s;
+      animation: fadeUp .3s ease both;
+      min-height: 130px;
+    }
+    .upcoming-card:active { transform: scale(.98); }
+    .upcoming-card.upcoming-today {
+      background: linear-gradient(135deg, rgba(34,197,94,.20), rgba(26,26,46,.95));
+      border-color: rgba(34,197,94,.50);
+    }
+    .upcoming-card.upcoming-tomorrow {
+      background: linear-gradient(135deg, rgba(250,204,21,.16), rgba(26,26,46,.95));
+      border-color: rgba(250,204,21,.45);
+    }
+    .upcoming-when-pill {
+      align-self: flex-start;
+      background: var(--accent-dim);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+      padding: 3px 9px;
+      border-radius: 999px;
+    }
+    .upcoming-when-pill.pill-today {
+      background: rgba(34,197,94,.20);
+      color: #4ade80;
+    }
+    .upcoming-when-pill.pill-tomorrow {
+      background: rgba(250,204,21,.18);
+      color: #facc15;
+    }
+    .upcoming-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1.25;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .upcoming-when-text {
+      font-size: 12px;
+      color: var(--text-2);
+      line-height: 1.35;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .upcoming-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      align-items: center;
+      margin-top: auto;
+    }
+    .upcoming-platform {
+      font-size: 10px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-weight: 700;
+      letter-spacing: .2px;
+    }
+    .upcoming-league {
+      background: #252540;
+      color: var(--text-2);
+      font-size: 10px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-weight: 600;
+    }
+
     /* ── Media card ───────────────────────────────────────── */
     .media-card {
       background: #1a1a2e;
@@ -717,11 +841,13 @@
 
     <!-- Shows tab -->
     <div id="tab-shows" class="tab-panel">
+      <div id="upcoming-shows" class="upcoming-section"></div>
       <div class="cards-grid" id="grid-shows"></div>
     </div>
 
     <!-- Live TV tab -->
     <div id="tab-livetv" class="tab-panel">
+      <div id="upcoming-livetv" class="upcoming-section"></div>
       <div class="cards-grid" id="grid-livetv"></div>
     </div>
 
@@ -910,6 +1036,75 @@ function statusPillClass(status) {
   if (s.includes('return') || s.includes('renew') || s.includes('ongoing') || s.includes('airing')) return 'pill-returning';
   if (s.includes('end') || s.includes('cancel') || s.includes('complet') || s.includes('final')) return 'pill-ended';
   return 'pill-upcoming';
+}
+
+/* Try to extract a Date from a free-form airing string.
+   Handles ISO, "January 15, 2026", "Jan 15", "1/15/2026". Returns null if none. */
+function parseAiringDate(text) {
+  if (!text) return null;
+  const txt = String(text).trim();
+  if (!txt) return null;
+
+  // ISO yyyy-mm-dd (with optional time)
+  const iso = txt.match(/(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2}))?/);
+  if (iso) {
+    const d = new Date(+iso[1], +iso[2] - 1, +iso[3], +(iso[4] || 0), +(iso[5] || 0));
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  // m/d/yyyy or m/d/yy
+  const slash = txt.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+  if (slash) {
+    let yr = slash[3] ? +slash[3] : new Date().getFullYear();
+    if (yr < 100) yr += 2000;
+    const d = new Date(yr, +slash[1] - 1, +slash[2]);
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  // Month name day, year
+  const months = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t)?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+  const re = new RegExp(`(${months})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:[,\\s]+(\\d{4}))?`, 'i');
+  const m = txt.match(re);
+  if (m) {
+    const tryStr = `${m[1]} ${m[2]}, ${m[3] || new Date().getFullYear()}`;
+    const d = new Date(tryStr);
+    if (!isNaN(d.getTime())) {
+      // Year wasn't given and the parsed date is already past — bump to next year.
+      if (!m[3] && d.getTime() < Date.now() - 86400000) d.setFullYear(d.getFullYear() + 1);
+      return d;
+    }
+  }
+
+  // Last resort: native parse (handles many odd formats)
+  const native = new Date(txt);
+  if (!isNaN(native.getTime()) && native.getFullYear() > 2000 && native.getFullYear() < 2100) {
+    return native;
+  }
+
+  return null;
+}
+
+/* Pretty relative when label given a Date, or null if the date is already past. */
+function relativeWhen(date) {
+  if (!date) return null;
+  const now = new Date();
+  const startOfToday  = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfTarget = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((startOfTarget - startOfToday) / 86400000);
+  if (diffDays < 0) return null;
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Tomorrow';
+  if (diffDays < 7)   return date.toLocaleDateString([], { weekday: 'long' });
+  if (diffDays < 30)  return `In ${diffDays} days`;
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+/* For recurring shows like "Tuesdays at 9pm", extract a day-of-week label. */
+function dayOfWeekHint(text) {
+  if (!text) return null;
+  const m = String(text).match(/\b(mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?)\b/i);
+  if (!m) return null;
+  return m[0].charAt(0).toUpperCase() + m[0].slice(1).toLowerCase();
 }
 
 /* Map tab key → Google Sheet name */
@@ -1124,9 +1319,98 @@ function showErrorState(tab) {
 }
 
 /* ════════════════════════════════════════════════════════════
+   UPCOMING RAIL (Shows: new episodes; Live TV: next games)
+════════════════════════════════════════════════════════════ */
+function collectUpcoming(tab) {
+  const src = tab === 'shows' ? S.shows : S.livetv;
+  const cutoff = Date.now() - 36 * 3600 * 1000; // keep "today" visible most of the day
+  const items = [];
+
+  src.forEach((raw, idx) => {
+    const n = norm(raw);
+    const text = tab === 'shows'
+      ? pick(n, 'nextairs', 'nextairing', 'airing', 'airs', 'whenitairs')
+      : pick(n, 'nextgame', 'next_game', 'nextairs', 'nextairing', 'airing');
+    if (!text) return;
+    const date = parseAiringDate(text);
+    if (date && date.getTime() < cutoff) return; // already aired
+    items.push({ raw, idx, text, date });
+  });
+
+  items.sort((a, b) => {
+    if (a.date && b.date) return a.date - b.date;
+    if (a.date) return -1;
+    if (b.date) return 1;
+    return 0;
+  });
+
+  return items;
+}
+
+function renderUpcomingCard(entry, tab) {
+  const { raw, idx, text, date } = entry;
+  const n     = norm(raw);
+  const title = pick(n, 'title', 'favorite_team_or_channel', 'channel') || 'Untitled';
+
+  const network = tab === 'shows'
+    ? pick(n, 'streamingon', 'streaming', 'network')
+    : pick(n, 'tvchannel', 'default_channel_or_provider', 'streamingon', 'network');
+  const ps = platformStyle(network);
+  const league = tab === 'livetv' ? pick(n, 'league') : '';
+
+  const rel  = relativeWhen(date) || dayOfWeekHint(text) || 'Upcoming';
+  const cls  = rel === 'Today'    ? 'upcoming-today'
+             : rel === 'Tomorrow' ? 'upcoming-tomorrow'
+             : '';
+  const pill = rel === 'Today'    ? 'pill-today'
+             : rel === 'Tomorrow' ? 'pill-tomorrow'
+             : '';
+
+  return `
+    <div class="upcoming-card ${cls}" onclick="openDetailSheet('${tab}', ${idx})">
+      <span class="upcoming-when-pill ${pill}">${esc(rel)}</span>
+      <div class="upcoming-title">${esc(title)}</div>
+      <div class="upcoming-when-text">${esc(text)}</div>
+      <div class="upcoming-meta">
+        ${network ? `<span class="upcoming-platform" style="background:${ps.bg};color:${ps.fg};${ps.border ? 'border:' + ps.border : ''}">${esc(network)}</span>` : ''}
+        ${league  ? `<span class="upcoming-league">${esc(league)}</span>` : ''}
+      </div>
+    </div>`;
+}
+
+function renderUpcomingRail(tab) {
+  if (tab !== 'shows' && tab !== 'livetv') return;
+  const containerId = tab === 'shows' ? 'upcoming-shows' : 'upcoming-livetv';
+  const el = document.getElementById(containerId);
+  if (!el) return;
+
+  // Hide rail while user is filtering/searching the grid.
+  if ((S.filter[tab] || '').trim()) { el.innerHTML = ''; return; }
+
+  const items = collectUpcoming(tab);
+  if (!items.length) { el.innerHTML = ''; return; }
+
+  const heading = tab === 'shows'
+    ? { icon: '📅', label: 'New Episodes Coming Up' }
+    : { icon: '🏆', label: 'Up Next' };
+
+  el.innerHTML = `
+    <div class="upcoming-heading">
+      <span class="upcoming-heading-title">${heading.icon} ${heading.label}</span>
+      <span class="upcoming-count">${items.length}</span>
+    </div>
+    <div class="upcoming-rail">
+      ${items.map(it => renderUpcomingCard(it, tab)).join('')}
+    </div>`;
+}
+
+/* ════════════════════════════════════════════════════════════
    GRID RENDERING  (filter + empty state)
 ════════════════════════════════════════════════════════════ */
 function renderGrid(tab) {
+  // Refresh the upcoming rail in lock-step with the grid for this tab.
+  renderUpcomingRail(tab);
+
   const grid = document.getElementById('grid-' + tab);
   if (!grid) return;
 
@@ -1427,6 +1711,9 @@ async function refreshCard(btn) {
     const newCard  = tmp.firstElementChild;
     newCard.style.animationDelay = '0s';
     card.replaceWith(newCard);
+
+    // The newly fetched next_airs / next_game may have changed the rail.
+    renderUpcomingRail(tab);
 
     toast('Updated ✓', 'success');
   } catch (err) {
