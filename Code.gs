@@ -40,11 +40,23 @@ var LIVE_TV_FIELDS = [
   'next_game', 'tv_channel'
 ];
 
+/* ── Cache ───────────────────────────────────────────────── */
+var CACHE_KEY = 'allMedia_v1';
+var CACHE_TTL = 300; // seconds (5 minutes)
+
+function invalidateCache() {
+  try { CacheService.getScriptCache().remove(CACHE_KEY); } catch (_) {}
+}
+
 /* ── Routing ─────────────────────────────────────────────── */
 function doGet(e) {
   try {
     var action = e && e.parameter ? e.parameter.action : 'getAllMedia';
-    if (action === 'getAllMedia') return respondJson(readAllMedia());
+    var force  = e && e.parameter && e.parameter.forceRefresh === 'true';
+    if (action === 'getAllMedia') {
+      if (force) invalidateCache();
+      return respondJson(readAllMedia());
+    }
     return respondJson({ error: 'Unknown action: ' + action });
   } catch (err) {
     return respondJson({ error: err.message });
@@ -56,9 +68,10 @@ function doPost(e) {
     var body   = JSON.parse(e.postData.contents);
     var action = body.action;
 
-    if (action === 'addRow')      return respondJson(handleAddRow(body.sheetName, body.rowData));
-    if (action === 'updateRow')   return respondJson(handleUpdateRow(body.sheetName, body.rowIndex, body.rowData));
-    if (action === 'claudeSearch') return respondJson(handleClaudeSearch(body.query, body.sheetName));
+    if (action === 'addRow')            return respondJson(handleAddRow(body.sheetName, body.rowData));
+    if (action === 'updateRow')         return respondJson(handleUpdateRow(body.sheetName, body.rowIndex, body.rowData));
+    if (action === 'claudeSearch')      return respondJson(handleClaudeSearch(body.query, body.sheetName));
+    if (action === 'removeDuplicates')  return respondJson(removeDuplicatesFromSheet(body.sheetName));
 
     return respondJson({ error: 'Unknown action: ' + action });
   } catch (err) {
@@ -67,37 +80,68 @@ function doPost(e) {
 }
 
 /* ── Read all media ──────────────────────────────────────── */
+
+/* Returns cached JSON when available so repeated fetches are near-instant.
+   The cache is invalidated whenever rows are written or duplicates removed. */
 function readAllMedia() {
+  var cache  = CacheService.getScriptCache();
+  var cached = cache.get(CACHE_KEY);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (_) {}
+  }
+
+  var result = fetchAllMediaFromSheet();
+
+  try { cache.put(CACHE_KEY, JSON.stringify(result), CACHE_TTL); } catch (_) {}
+
+  return result;
+}
+
+/* Reads both sheets and returns deduplicated arrays.
+   Duplicates are detected case-insensitively on title (Content_Master)
+   and favorite_team_or_channel (Live_TV_Channels). Only the first
+   occurrence of each key is kept so rowIndex remains valid for updates. */
+function fetchAllMediaFromSheet() {
   var ss      = SpreadsheetApp.getActiveSpreadsheet();
   var movies  = [];
   var shows   = [];
   var liveTV  = [];
 
-  /* Content_Master → split by content_type */
+  /* Content_Master → split by content_type, dedup by title */
   var contentSheet = ss.getSheetByName(CONTENT_MASTER);
   if (contentSheet) {
     var rawData = contentSheet.getDataRange().getValues();
     if (rawData.length > 1) {
-      var headers = normalizeHeaders(rawData[0]);
+      var headers     = normalizeHeaders(rawData[0]);
+      var seenContent = {};
       for (var i = 1; i < rawData.length; i++) {
         var row = buildObj(headers, rawData[i]);
+        var key = String(row['title'] || '').toLowerCase().trim();
+        if (!key) continue;            // skip blank rows
+        if (seenContent[key]) continue; // skip duplicates
+        seenContent[key] = true;
         var item = projectFields(row, CONTENT_FIELDS);
         item.rowIndex = i + 1;
         var ct = String(row['content_type'] || '').trim();
-        if (ct === 'Movie')   movies.push(item);
+        if (ct === 'Movie')        movies.push(item);
         else if (ct === 'TV Show') shows.push(item);
       }
     }
   }
 
-  /* Live_TV_Channels */
+  /* Live_TV_Channels — dedup by favorite_team_or_channel */
   var liveSheet = ss.getSheetByName(LIVE_TV_SHEET);
   if (liveSheet) {
     var liveRaw = liveSheet.getDataRange().getValues();
     if (liveRaw.length > 1) {
       var liveHeaders = normalizeHeaders(liveRaw[0]);
+      var seenLive    = {};
       for (var j = 1; j < liveRaw.length; j++) {
         var liveRow = buildObj(liveHeaders, liveRaw[j]);
+        var liveKey = String(liveRow['favorite_team_or_channel'] || '').toLowerCase().trim();
+        if (!liveKey) continue;        // skip blank rows
+        if (seenLive[liveKey]) continue; // skip duplicates
+        seenLive[liveKey] = true;
         var liveItem = projectFields(liveRow, LIVE_TV_FIELDS);
         liveItem.rowIndex = j + 1;
         liveTV.push(liveItem);
@@ -136,6 +180,7 @@ function handleAddRow(sheetName, rowData) {
     appendByHeaders(sheet, contentRow);
   }
 
+  invalidateCache();
   return { success: true };
 }
 
@@ -151,6 +196,55 @@ function hasDuplicate(sheet, titleHeader, newTitle) {
     if (String(data[i][titleIdx]).toLowerCase().trim() === newTitle) return true;
   }
   return false;
+}
+
+/* ── Remove duplicates from a sheet ─────────────────────── */
+/* Scans the sheet for rows whose key column (title for Content_Master,
+   favorite_team_or_channel for Live_TV_Channels) appears more than once
+   (case-insensitive). All occurrences after the first are deleted.
+   Rows are deleted from the bottom up so indices don't shift mid-loop.
+   Returns { success, removed } where removed is the count of deleted rows. */
+function removeDuplicatesFromSheet(sheetName) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet, keyCol;
+
+  if (isLiveTVSheet(sheetName)) {
+    sheet  = ss.getSheetByName(LIVE_TV_SHEET);
+    keyCol = 'favorite_team_or_channel';
+  } else {
+    sheet  = ss.getSheetByName(CONTENT_MASTER);
+    keyCol = 'title';
+  }
+  if (!sheet) return { error: 'Sheet not found: ' + sheetName };
+
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return { success: true, removed: 0 };
+
+  var headers = normalizeHeaders(data[0]);
+  var keyIdx  = headers.indexOf(keyCol);
+  if (keyIdx === -1) return { error: 'Key column not found: ' + keyCol };
+
+  var seen         = {};
+  var rowsToDelete = [];
+
+  for (var i = 1; i < data.length; i++) {
+    var key = String(data[i][keyIdx]).toLowerCase().trim();
+    if (!key) continue;
+    if (seen[key]) {
+      rowsToDelete.push(i + 1); // 1-based sheet row number
+    } else {
+      seen[key] = true;
+    }
+  }
+
+  /* Delete from bottom to top so earlier row indices stay valid */
+  for (var d = rowsToDelete.length - 1; d >= 0; d--) {
+    sheet.deleteRow(rowsToDelete[d]);
+  }
+
+  if (rowsToDelete.length > 0) invalidateCache();
+
+  return { success: true, removed: rowsToDelete.length };
 }
 
 /* ── Map Claude's output keys → sheet header keys ────────── */
@@ -237,6 +331,7 @@ function handleUpdateRow(sheetName, rowIndex, rowData) {
   });
 
   sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+  invalidateCache();
   return { success: true };
 }
 
