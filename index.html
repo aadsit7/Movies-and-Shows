@@ -2265,10 +2265,15 @@ function renderUpcomingLibrary() {
   }
 
   items.sort((a, b) => {
-    if (a.date && b.date) return a.date - b.date;
-    if (a.date) return -1;
-    if (b.date) return 1;
-    return 0;
+    // Soonest first; items with no parsed date sink to the bottom.
+    const at = a.date ? a.date.getTime() : Infinity;
+    const bt = b.date ? b.date.getTime() : Infinity;
+    if (at !== bt) return at - bt;
+    // Stable alphabetical tiebreaker so identical times don't reshuffle.
+    const an = norm(a.raw), bn = norm(b.raw);
+    const atitle = (pick(an, 'title', 'favorite_team_or_channel', 'channel') || '').toLowerCase();
+    const btitle = (pick(bn, 'title', 'favorite_team_or_channel', 'channel') || '').toLowerCase();
+    return atitle.localeCompare(btitle);
   });
 
   if (!items.length) { el.innerHTML = ''; return; }
@@ -2308,7 +2313,14 @@ function renderLibrary() {
       }
       return true;
     });
-    if (!words.length) entries.sort((a, b) => a.airsDate - b.airsDate);
+    // Always sort soonest-first so Today comes before Tomorrow before later
+    // dates, even while a search query is active. Title is used as a stable
+    // tiebreaker so identical air times don't reshuffle between renders.
+    entries.sort((a, b) => {
+      const dt = a.airsDate.getTime() - b.airsDate.getTime();
+      if (dt !== 0) return dt;
+      return (a.titleLc || '').localeCompare(b.titleLc || '');
+    });
   } else if (type === 'favorites') {
     entries = searchIndex.filter(e => isFavorite(e.raw));
   } else if (type === 'all') {
@@ -2321,16 +2333,19 @@ function renderLibrary() {
     // Multi-word AND: every word must appear somewhere in the haystack
     entries = entries.filter(e => words.every(w => e.haystack.includes(w)));
 
-    // Rank: exact title match first, then all words in title, then others
-    entries.sort((a, b) => {
-      const aExact = a.titleLc === rawQuery.toLowerCase();
-      const bExact = b.titleLc === rawQuery.toLowerCase();
-      if (aExact !== bExact) return aExact ? -1 : 1;
-      const aTitle = words.every(w => a.titleLc.includes(w));
-      const bTitle = words.every(w => b.titleLc.includes(w));
-      if (aTitle !== bTitle) return aTitle ? -1 : 1;
-      return 0;
-    });
+    if (type !== 'upcoming') {
+      // Rank: exact title match first, then all words in title, then others.
+      // Skipped for the Upcoming view so date order is preserved during a search.
+      entries.sort((a, b) => {
+        const aExact = a.titleLc === rawQuery.toLowerCase();
+        const bExact = b.titleLc === rawQuery.toLowerCase();
+        if (aExact !== bExact) return aExact ? -1 : 1;
+        const aTitle = words.every(w => a.titleLc.includes(w));
+        const bTitle = words.every(w => b.titleLc.includes(w));
+        if (aTitle !== bTitle) return aTitle ? -1 : 1;
+        return 0;
+      });
+    }
   } else if (type !== 'upcoming') {
     // No query: shows/livetv with upcoming dates first, sorted by date; movies after
     entries.sort((a, b) => {
@@ -2588,10 +2603,15 @@ function collectUpcoming(tab) {
   });
 
   items.sort((a, b) => {
-    if (a.date && b.date) return a.date - b.date;
-    if (a.date) return -1;
-    if (b.date) return 1;
-    return 0;
+    // Soonest first; items with no parsed date sink to the bottom.
+    const at = a.date ? a.date.getTime() : Infinity;
+    const bt = b.date ? b.date.getTime() : Infinity;
+    if (at !== bt) return at - bt;
+    // Stable alphabetical tiebreaker.
+    const an = norm(a.raw), bn = norm(b.raw);
+    const atitle = (pick(an, 'title', 'favorite_team_or_channel', 'channel') || '').toLowerCase();
+    const btitle = (pick(bn, 'title', 'favorite_team_or_channel', 'channel') || '').toLowerCase();
+    return atitle.localeCompare(btitle);
   });
 
   return items;
