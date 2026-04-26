@@ -2662,17 +2662,17 @@ function renderCard(raw, tab, idx) {
     const type     = pick(n, 'live_tv_type');
     const league   = pick(n, 'league');
     const provider = pick(n, 'default_channel_or_provider');
-    const nextAirs = pick(n, 'nextairs', 'nextairing', 'nextgame', 'airing', 'airs', 'whenitairs');
+    const nextAirs = pick(n, 'nextgame', 'next_game', 'nextairs', 'nextairing', 'airing', 'airs', 'whenitairs');
     if (channel)  extraHtml += `<div class="info-line">📺 <span>${esc(channel)}</span></div>`;
     if (type)     extraHtml += `<div class="info-line">📡 <span>${esc(type)}</span></div>`;
     if (league)   extraHtml += `<div class="info-line">🏆 <span>${esc(league)}</span></div>`;
     if (provider) extraHtml += `<div class="info-line">🎛️ <span>${esc(provider)}</span></div>`;
     extraHtml += `
       <div class="airing-block">
-        <div class="airing-label">When does it air?</div>
+        <div class="airing-label">Next game</div>
         ${nextAirs
           ? `<div class="airing-value">${esc(nextAirs)}</div>`
-          : `<div class="airing-empty">Tap 🔄 to check</div>`}
+          : `<div class="airing-empty">Tap refresh to load schedule</div>`}
       </div>`;
   }
 
@@ -2730,6 +2730,7 @@ function openDetailSheet(tab, idx) {
     const network  = pick(n, 'network');
     const cast     = pick(n, 'cast');
     const nextAirs = pick(n, 'nextairs', 'nextairing', 'airing', 'airs', 'whenitairs');
+    const episodes = Array.isArray(raw.episodes) ? raw.episodes : [];
     if (latest)  extraHtml += `<div class="ep-block"><div class="ep-label">Latest Episode</div><div class="ep-value">${esc(latest)}</div></div>`;
     if (status)  extraHtml += `<div class="info-line">📊 <span><strong>Status:</strong> ${esc(status)}</span></div>`;
     if (seasons) extraHtml += `<div class="info-line">📅 <span><strong>Seasons:</strong> ${esc(seasons)}</span></div>`;
@@ -2742,6 +2743,21 @@ function openDetailSheet(tab, idx) {
           ? `<div class="airing-value">${esc(nextAirs)}</div>`
           : `<div class="airing-empty">Tap 🔄 on the card to check</div>`}
       </div>`;
+    if (episodes.length) {
+      extraHtml += `
+        <div class="ep-block" style="margin-top:14px">
+          <div class="ep-label">Upcoming Episodes</div>
+          ${episodes.map(ep => {
+            const en = norm(ep);
+            const s  = pick(en, 'season');
+            const e  = pick(en, 'episode');
+            const t  = pick(en, 'episode_title', 'title');
+            const d  = pick(en, 'air_date', 'date');
+            const code = (s ? 'S' + String(s).padStart(2,'0') : '') + (e ? 'E' + String(e).padStart(2,'0') : '');
+            return `<div class="ep-value" style="margin-top:4px">${esc(code)}${code && t ? ' · ' : ''}${esc(t)}${d ? ' — ' + esc(d) : ''}</div>`;
+          }).join('')}
+        </div>`;
+    }
   } else {
     const channel   = pick(n, 'favorite_team_or_channel', 'channel');
     const network   = pick(n, 'network');
@@ -2749,6 +2765,7 @@ function openDetailSheet(tab, idx) {
     const tvChannel = pick(n, 'tvchannel');
     const provider  = pick(n, 'default_channel_or_provider');
     const nextGame  = pick(n, 'nextgame', 'next_game', 'nextairs', 'nextairing', 'airing');
+    const games     = Array.isArray(raw.games) ? raw.games : [];
     if (channel)   extraHtml += `<div class="info-line">📺 <span><strong>Channel:</strong> ${esc(channel)}</span></div>`;
     if (network)   extraHtml += `<div class="info-line">📡 <span><strong>Network:</strong> ${esc(network)}</span></div>`;
     if (league)    extraHtml += `<div class="info-line">🏆 <span><strong>League:</strong> ${esc(league)}</span></div>`;
@@ -2756,11 +2773,25 @@ function openDetailSheet(tab, idx) {
     if (provider)  extraHtml += `<div class="info-line">🎛️ <span><strong>Provider:</strong> ${esc(provider)}</span></div>`;
     extraHtml += `
       <div class="airing-block">
-        <div class="airing-label">${nextGame ? 'Next Game / When does it air?' : 'When does it air?'}</div>
+        <div class="airing-label">Next game</div>
         ${nextGame
           ? `<div class="airing-value">${esc(nextGame)}</div>`
-          : `<div class="airing-empty">Tap 🔄 on the card to check</div>`}
+          : `<div class="airing-empty">Tap refresh to load schedule</div>`}
       </div>`;
+    if (games.length) {
+      extraHtml += `
+        <div class="ep-block" style="margin-top:14px">
+          <div class="ep-label">Upcoming Games</div>
+          ${games.map(g => {
+            const gn  = norm(g);
+            const d   = pick(gn, 'date');
+            const tm  = pick(gn, 'time');
+            const opp = pick(gn, 'opponent');
+            const ch  = pick(gn, 'tv_channel', 'tvchannel', 'channel');
+            return `<div class="ep-value" style="margin-top:4px">${esc(d)}${tm ? ' · ' + esc(tm) : ''}${opp ? ' — vs ' + esc(opp) : ''}${ch ? ' · ' + esc(ch) : ''}</div>`;
+          }).join('')}
+        </div>`;
+    }
   }
 
   const trailerUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(title + ' trailer')}`;
@@ -2812,9 +2843,14 @@ async function refreshCard(btn) {
   btn.classList.add('spinning');
 
   try {
-    let query = `REFRESH: ${title} get latest episode, season, streaming platform, IMDB score as of 2026`;
-    if (tab === 'shows' || tab === 'livetv') {
-      query += `. When does ${title} next air? What channel and time? Include the answer in a "nextAirs" field.`;
+    let query;
+    if (tab === 'shows') {
+      query = `REFRESH ${title} TV show - latest season, next episode air date, streaming platform 2026`;
+    } else if (tab === 'livetv') {
+      const league = pick(norm(raw), 'league');
+      query = `Next 5 games for ${title}${league ? ' ' + league : ''} 2026 - return date, time, opponent, TV channel for each game`;
+    } else {
+      query = `REFRESH ${title} - latest streaming platform, IMDB score, cast 2026`;
     }
 
     let response;
@@ -3175,7 +3211,6 @@ async function confirmSheetAdd(sheetTarget) {
   let response;
   try {
     const postBody = { action: 'addRow', sheetName: sheetTarget, rowData: data };
-    console.log('POST body:', JSON.stringify(postBody));
     response = await fetch(APPS_SCRIPT_URL, {
       method:   'POST',
       headers:  { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -3204,8 +3239,6 @@ async function confirmSheetAdd(sheetTarget) {
     toast('Add failed — invalid server response', 'error');
     return;
   }
-  console.log('POST response:', JSON.stringify(result));
-
   if (result && result.error) {
     if (btn) { btn.disabled = false; btn.textContent = 'Add to Library'; }
     toast(`Add failed — ${result.error}`, 'error');
@@ -3378,11 +3411,14 @@ async function updateAll() {
     if (!rowIdx) { errCount++; continue; }
 
     try {
-      let query = `REFRESH: ${title} — get latest season, latest episode title and number, current streaming platform as of 2026, updated IMDB score`;
+      let query;
       if (tab === 'shows') {
-        query += `. When does ${title} next air? What channel, day and time? Return JSON with: type, title, year, genre, rating, description, network, seasons, latestEpisode, status, nextAirs, cast, streamingOn, imdbScore`;
+        query = `REFRESH ${title} TV show - latest season, next episode air date, streaming platform 2026`;
       } else if (tab === 'livetv') {
-        query += `. When is the next game or airing for ${title}? Return JSON with: type, channel, network, league, genre, description, streamingOn, nextGame, tvChannel`;
+        const league = pick(norm(item), 'league');
+        query = `Next 5 games for ${title}${league ? ' ' + league : ''} 2026 - return date, time, opponent, TV channel for each game`;
+      } else {
+        query = `REFRESH ${title} - latest streaming platform, IMDB score, cast 2026`;
       }
       // Do NOT pass sheetName — claudeSearch with a sheetName triggers handleAddRow on
       // the backend, which can create duplicate rows when Claude returns a slightly
