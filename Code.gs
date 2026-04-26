@@ -29,6 +29,25 @@ function getAnthropicKey() {
   return fromProps || ANTHROPIC_API_KEY || '';
 }
 
+/* Spreadsheet access — works for both container-bound and standalone scripts.
+   For a standalone web app, set the SPREADSHEET_ID Script Property to the
+   ID from your Google Sheet URL:
+     https://docs.google.com/spreadsheets/d/<SPREADSHEET_ID>/edit
+   For a container-bound script (created inside the sheet), leave it unset. */
+function getSpreadsheet() {
+  var ssId = '';
+  try {
+    ssId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID') || '';
+  } catch (_) {}
+  if (ssId) return SpreadsheetApp.openById(ssId);
+  var active = SpreadsheetApp.getActiveSpreadsheet();
+  if (!active) throw new Error(
+    'No spreadsheet found. Set the SPREADSHEET_ID Script Property to your sheet\'s ID, ' +
+    'or run this script from within your Google Sheet.'
+  );
+  return active;
+}
+
 /* Fields projected for each content type. Optional columns
    (streaming_on, imdb_score, etc.) are surfaced if the sheet has them; if
    not, projectFields just emits an empty string for that key. */
@@ -121,7 +140,7 @@ function readAllMedia() {
    and favorite_team_or_channel (Live_TV_Channels). Only the first
    occurrence of each key is kept so rowIndex remains valid for updates. */
 function fetchAllMediaFromSheet() {
-  var ss      = SpreadsheetApp.getActiveSpreadsheet();
+  var ss      = getSpreadsheet();
   var movies  = [];
   var shows   = [];
   var liveTV  = [];
@@ -297,7 +316,7 @@ function ensureColumns(sheet, requiredCols) {
 
 /* ── Add row ─────────────────────────────────────────────── */
 function handleAddRow(sheetName, rowData) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = getSpreadsheet();
 
   if (isLiveTVSheet(sheetName)) {
     var sheet = ss.getSheetByName(LIVE_TV_SHEET);
@@ -355,7 +374,7 @@ function hasDuplicate(sheet, titleHeader, newTitle, contentType) {
    Rows are deleted from the bottom up so indices don't shift mid-loop.
    Returns { success, removed } where removed is the count of deleted rows. */
 function removeDuplicatesFromSheet(sheetName) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = getSpreadsheet();
   var sheet, keyCol;
 
   if (isLiveTVSheet(sheetName)) {
@@ -461,7 +480,7 @@ function firstOf(obj, keys) {
 
 /* ── Update row ──────────────────────────────────────────── */
 function handleUpdateRow(sheetName, rowIndex, rowData) {
-  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var ss    = getSpreadsheet();
   var sheet = isLiveTVSheet(sheetName)
     ? ss.getSheetByName(LIVE_TV_SHEET)
     : ss.getSheetByName(CONTENT_MASTER);
@@ -501,7 +520,7 @@ function handleUpdateRow(sheetName, rowIndex, rowData) {
 
 /* ── Delete row ──────────────────────────────────────────── */
 function handleDeleteRow(sheetName, rowIndex) {
-  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var ss    = getSpreadsheet();
   var sheet = isLiveTVSheet(sheetName)
     ? ss.getSheetByName(LIVE_TV_SHEET)
     : ss.getSheetByName(CONTENT_MASTER);
@@ -537,7 +556,7 @@ function handleSaveGames(channelId, games) {
 }
 
 function writeScheduleRows(sheetName, fields, joinKey, joinValue, rows) {
-  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var ss    = getSpreadsheet();
   var sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
     sheet = ss.insertSheet(sheetName);
