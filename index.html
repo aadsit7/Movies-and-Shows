@@ -1359,7 +1359,7 @@
    CONSTANTS & CONFIG
 ════════════════════════════════════════════════════════════ */
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzcXxFOz7wJGP4Zidt9HkFhhAMVUSivV6NLL8noP_Slkb0vFcwIFxB220plyVUlL7ymfw/exec';
-const APP_VERSION     = '1.3.0';
+const APP_VERSION     = '1.3.1';
 
 /* ── Streaming platform brand colours ───────────────────── */
 const PLATFORM_COLORS = {
@@ -1638,6 +1638,21 @@ function relativeWhen(date) {
   if (diffDays < 7)   return date.toLocaleDateString([], { weekday: 'long' });
   if (diffDays < 30)  return `In ${diffDays} days`;
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+/* Parse a date value (ISO string, date-only string, or Date) and return a
+   friendly label: "Today", "Tomorrow", day name, "Apr 26", or the original
+   string if it cannot be parsed as a date. */
+function friendlyDate(value) {
+  if (!value) return value;
+  const s = String(value).trim();
+  // If it already looks like a human label (no digits or very short), keep it
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return s; // unparseable — return as-is
+  const label = relativeWhen(d);
+  if (label) return label;
+  // relativeWhen returns null for past dates; show the date anyway
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
 /* For recurring shows like "Tuesdays at 9pm", extract a day-of-week label. */
@@ -2272,7 +2287,7 @@ function renderUpcomingCard(entry, tab) {
     <div class="upcoming-card ${cls}" onclick="openDetailSheet('${tab}', ${idx})">
       <span class="upcoming-when-pill ${pill}">${esc(rel)}</span>
       <div class="upcoming-title">${esc(title)}</div>
-      <div class="upcoming-when-text">${esc(text)}</div>
+      <div class="upcoming-when-text">${esc(friendlyDate(text))}</div>
       <div class="upcoming-meta">
         ${network ? `<span class="upcoming-platform" style="background:${ps.bg};color:${ps.fg};${ps.border ? 'border:' + ps.border : ''}">${esc(network)}</span>` : ''}
         ${league  ? `<span class="upcoming-league">${esc(league)}</span>` : ''}
@@ -2430,7 +2445,7 @@ function renderScheduleItem(entry) {
         <div class="schedule-item-info">
           <div class="schedule-item-title">${esc(title)}</div>
           ${latest ? `<div class="schedule-item-ep">${esc(latest)}</div>` : ''}
-          <div class="schedule-item-when">${esc(text)}</div>
+          <div class="schedule-item-when">${esc(friendlyDate(text))}</div>
         </div>
         ${timeStr ? `<div class="schedule-item-time">${esc(timeStr)}</div>` : ''}
       </div>
@@ -2881,7 +2896,7 @@ function renderCard(raw, tab, idx) {
       <div class="airing-block">
         <div class="airing-label">When does it air?</div>
         ${nextAirs
-          ? `<div class="airing-value">${esc(nextAirs)}</div>`
+          ? `<div class="airing-value">${esc(friendlyDate(nextAirs))}</div>`
           : `<div class="airing-empty">Tap 🔄 to check</div>`}
       </div>`;
     if (network) extraHtml += `<div class="info-line">📡 <span>${esc(network)}</span></div>`;
@@ -2902,7 +2917,7 @@ function renderCard(raw, tab, idx) {
       <div class="airing-block">
         <div class="airing-label">Next game</div>
         ${nextAirs
-          ? `<div class="airing-value">${esc(nextAirs)}</div>`
+          ? `<div class="airing-value">${esc(friendlyDate(nextAirs))}</div>`
           : `<div class="airing-empty">Tap refresh to load schedule</div>`}
       </div>`;
   }
@@ -2971,7 +2986,7 @@ function openDetailSheet(tab, idx) {
       <div class="airing-block">
         <div class="airing-label">When does it air?</div>
         ${nextAirs
-          ? `<div class="airing-value">${esc(nextAirs)}</div>`
+          ? `<div class="airing-value">${esc(friendlyDate(nextAirs))}</div>`
           : `<div class="airing-empty">Tap 🔄 on the card to check</div>`}
       </div>`;
     if (episodes.length) {
@@ -2985,7 +3000,7 @@ function openDetailSheet(tab, idx) {
             const t  = pick(en, 'episode_title', 'title');
             const d  = pick(en, 'air_date', 'date');
             const code = (s ? 'S' + String(s).padStart(2,'0') : '') + (e ? 'E' + String(e).padStart(2,'0') : '');
-            return `<div class="ep-value" style="margin-top:4px">${esc(code)}${code && t ? ' · ' : ''}${esc(t)}${d ? ' — ' + esc(d) : ''}</div>`;
+            return `<div class="ep-value" style="margin-top:4px">${esc(code)}${code && t ? ' · ' : ''}${esc(t)}${d ? ' — ' + esc(friendlyDate(d)) : ''}</div>`;
           }).join('')}
         </div>`;
     }
@@ -3006,7 +3021,7 @@ function openDetailSheet(tab, idx) {
       <div class="airing-block">
         <div class="airing-label">Next game</div>
         ${nextGame
-          ? `<div class="airing-value">${esc(nextGame)}</div>`
+          ? `<div class="airing-value">${esc(friendlyDate(nextGame))}</div>`
           : `<div class="airing-empty">Tap refresh to load schedule</div>`}
       </div>`;
     if (games.length) {
@@ -3019,7 +3034,7 @@ function openDetailSheet(tab, idx) {
             const tm  = pick(gn, 'time');
             const opp = pick(gn, 'opponent');
             const ch  = pick(gn, 'tv_channel', 'tvchannel', 'channel');
-            return `<div class="ep-value" style="margin-top:4px">${esc(d)}${tm ? ' · ' + esc(tm) : ''}${opp ? ' — vs ' + esc(opp) : ''}${ch ? ' · ' + esc(ch) : ''}</div>`;
+            return `<div class="ep-value" style="margin-top:4px">${esc(friendlyDate(d))}${tm ? ' · ' + esc(tm) : ''}${opp ? ' — vs ' + esc(opp) : ''}${ch ? ' · ' + esc(ch) : ''}</div>`;
           }).join('')}
         </div>`;
     }
@@ -3991,8 +4006,8 @@ function renderSearchResults(results, apiErrors) {
         </div>
         ${(streaming || network) ? `<div style="margin-bottom:6px"><span class="platform-badge" style="background:${ps.bg};color:${ps.fg}">${esc(streaming || network)}</span></div>` : ''}
         ${imdb ? `<div style="margin-bottom:6px"><span class="imdb-badge">⭐ ${esc(imdb)}</span></div>` : ''}
-        ${nextAirs ? `<div style="font-size:12px;color:var(--text-2);margin-bottom:4px">📅 Next airs: ${esc(nextAirs)}</div>` : ''}
-        ${nextGame ? `<div style="font-size:12px;color:var(--text-2);margin-bottom:4px">🏟️ Next game: ${esc(nextGame)}</div>` : ''}
+        ${nextAirs ? `<div style="font-size:12px;color:var(--text-2);margin-bottom:4px">📅 Next airs: ${esc(friendlyDate(nextAirs))}</div>` : ''}
+        ${nextGame ? `<div style="font-size:12px;color:var(--text-2);margin-bottom:4px">🏟️ Next game: ${esc(friendlyDate(nextGame))}</div>` : ''}
         ${desc ? `<p style="font-size:13px;color:var(--text-2);line-height:1.5;margin:6px 0 10px">${esc(desc.substring(0,200))}${desc.length>200?'…':''}</p>` : ''}
         <div style="display:flex;gap:8px;align-items:center">
           <button class="btn btn-primary btn-sm" style="flex:1" id="save-btn-${i}"
