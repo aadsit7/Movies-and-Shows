@@ -3674,10 +3674,18 @@ async function confirmAdd(source) {
       return;
     }
 
-    // update local state optimistically so the library refreshes immediately
-    if (tab === 'movies')      S.movies.push(parsed);
-    else if (tab === 'shows')  S.shows.push(parsed);
-    else                       S.livetv.push(parsed);
+    // Optimistic local update so the library refreshes immediately.
+    // Tag the in-memory copy with the same content_type the backend just
+    // wrote, so any code that filters by content_type sees the new row.
+    if (tab === 'movies') {
+      parsed.content_type = parsed.content_type || 'Movie';
+      S.movies.push(parsed);
+    } else if (tab === 'shows') {
+      parsed.content_type = parsed.content_type || 'TV Show';
+      S.shows.push(parsed);
+    } else {
+      S.livetv.push(parsed);
+    }
     _indexDirty = true;
     renderLibrary();
     // show the new item in the schedule straight away (it may have nextAirs)
@@ -3698,9 +3706,10 @@ async function confirmAdd(source) {
 
     if (source === 'sheet') setTimeout(closeSheet, 1600);
 
-    // reload from sheet in background to get the proper rowIndex for the
-    // new item (needed for future refreshCard / updateAll calls)
-    loadAllData();
+    // Reload from the sheet so the new item has the proper rowIndex and
+    // sheet-projected keys. force:true is required because loadAllData's
+    // staleness guard would otherwise skip this for ~5 minutes.
+    loadAllData({ force: true });
   } catch (err) {
     console.error('confirmAdd:', err);
     if (btn) { btn.disabled = false; btn.textContent = 'Add to Library'; }
@@ -4442,9 +4451,17 @@ async function saveSearchResult(idx) {
     }
     if (result?.error) throw new Error(result.error);
 
-    if (tab === 'movies')     S.movies.push(item);
-    else if (tab === 'shows') S.shows.push(item);
-    else                      S.livetv.push(item);
+    // Tag the in-memory copy with the same content_type the backend wrote,
+    // so any code that filters by content_type sees the new row.
+    if (tab === 'movies') {
+      item.content_type = item.content_type || 'Movie';
+      S.movies.push(item);
+    } else if (tab === 'shows') {
+      item.content_type = item.content_type || 'TV Show';
+      S.shows.push(item);
+    } else {
+      S.livetv.push(item);
+    }
     _indexDirty = true;
 
     if (btn) { btn.textContent = 'Saved ✓'; }
@@ -4460,7 +4477,9 @@ async function saveSearchResult(idx) {
       apiPost({ action: 'saveGames', channelId: item.channel || item.title, games: item.games }).catch(() => {});
     }
 
-    loadAllData();
+    // Force a reload so the new item gets its proper rowIndex from the
+    // sheet (loadAllData's staleness guard would otherwise skip this).
+    loadAllData({ force: true });
   } catch (err) {
     if (btn) { btn.disabled = false; btn.textContent = 'Save to Library'; }
     toast('Save failed — ' + (err.message || 'try again'), 'error');
