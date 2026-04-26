@@ -2780,7 +2780,7 @@ function renderUpcomingRail(tab) {
 
 /* Hero card for the single next upcoming item. Returns '' if nothing is coming up. */
 function renderNextUpHero(days) {
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 7; i++) {
     const items = days[i];
     if (!items || !items.length) continue;
     const { raw, idx, text, date, tab } = items[0];
@@ -2827,10 +2827,12 @@ function collectThisWeek() {
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const days = {};     // diffDays (0-6) → array of entries
-  const recurring = [];
 
-  /* Shows (active only) + all Live TV entries.
-     Movies are excluded — the schedule is a TV guide, not a release calendar. */
+  /* Shows (active only) + all Live TV entries — only those with a concrete
+     next-air date in the next 7 days. Movies are excluded — the schedule is
+     a TV guide, not a release calendar. Recurring "Tuesdays 9pm"-style
+     entries without a real date are skipped because the user wants the
+     "next new episode" date specifically. */
   [
     { tab: 'shows',  items: S.shows  },
     { tab: 'livetv', items: S.livetv }
@@ -2846,28 +2848,26 @@ function collectThisWeek() {
       if (!text) return;
 
       const date = parseAiringDate(text);
-      if (date) {
-        const startOfTarget = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-        const diff = Math.round((startOfTarget - startOfToday) / 86400000);
-        /* Show upcoming items up to 30 days out, sorted nearest-first */
-        if (diff >= 0 && diff < 30) {
-          if (!days[diff]) days[diff] = [];
-          days[diff].push({ raw, idx, text, date, tab });
-        }
-      } else if (dayOfWeekHint(text)) {
-        /* Recurring weekly slots (day-of-week hints like "Tuesdays at 9pm") */
-        recurring.push({ raw, idx, text, date: null, tab });
-      }
+      if (!date) return;
+
+      const startOfTarget = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      const diff = Math.round((startOfTarget - startOfToday) / 86400000);
+      if (diff < 0 || diff >= 7) return;
+
+      if (!days[diff]) days[diff] = [];
+      days[diff].push({ raw, idx, text, date, tab });
     });
   });
 
-  // sort items within each day by time
+  // sort items within each day by time, alphabetically as a tiebreaker
   Object.values(days).forEach(arr => arr.sort((a, b) => {
-    if (a.date && b.date) return a.date - b.date;
-    return 0;
+    if (a.date && b.date && a.date.getTime() !== b.date.getTime()) return a.date - b.date;
+    const ta = pick(norm(a.raw), 'title', 'favorite_team_or_channel', 'channel').toLowerCase();
+    const tb = pick(norm(b.raw), 'title', 'favorite_team_or_channel', 'channel').toLowerCase();
+    return ta.localeCompare(tb);
   }));
 
-  return { days, recurring };
+  return { days };
 }
 
 function renderScheduleItem(entry) {
@@ -3090,7 +3090,7 @@ function renderScheduleTab() {
     return;
   }
 
-  const { days, recurring } = collectThisWeek();
+  const { days } = collectThisWeek();
   const query = (S.filter.upcoming || S.filter.schedule || '').toLowerCase().trim();
   const now = new Date();
   const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -3114,8 +3114,8 @@ function renderScheduleTab() {
   let html = '';
   // "Up Next" hero — the single soonest upcoming item, shown at the top when not filtering
   if (!query) html += renderNextUpHero(days);
-  // Iterate all 30 days; nearest date sections appear first automatically.
-  for (let i = 0; i < 30; i++) {
+  // Iterate the next 7 days; nearest date sections appear first automatically.
+  for (let i = 0; i < 7; i++) {
     const allItems = days[i];
     if (!allItems || !allItems.length) continue;
     const items = allItems.filter(scheduleMatchesQuery);
@@ -3132,21 +3132,6 @@ function renderScheduleTab() {
         </div>
         <div class="schedule-items">
           ${items.map(e => renderScheduleItem(e)).join('')}
-        </div>
-      </div>`;
-  }
-
-  const filteredRecurring = recurring.filter(scheduleMatchesQuery);
-  if (filteredRecurring.length) {
-    html += `
-      <div class="schedule-day-section">
-        <div class="schedule-day-header">
-          <span class="schedule-day-label">Recurring</span>
-          <span class="schedule-day-date">Weekly schedule</span>
-          <span class="schedule-day-count">${filteredRecurring.length}</span>
-        </div>
-        <div class="schedule-items">
-          ${filteredRecurring.map(e => renderScheduleItem(e)).join('')}
         </div>
       </div>`;
   }
