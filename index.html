@@ -4725,6 +4725,9 @@ function renderRecommendedResults(results) {
             onclick="saveRecommendedResult(${i})">Save to Library</button>
           <a href="${esc(trailerUrl)}" target="_blank" rel="noopener noreferrer"
              class="btn btn-secondary btn-sm" style="flex:1;text-decoration:none;text-align:center">▶ Watch Trailer</a>
+          <button class="btn btn-secondary btn-sm" id="rec-dislike-btn-${i}"
+            onclick="dislikeRecommendedResult(${i})" title="Not for me — hide this forever"
+            style="flex-shrink:0">👎</button>
         </div>
       </div>`;
   }).join('');
@@ -4798,6 +4801,28 @@ async function saveRecommendedResult(idx) {
     if (btn) { btn.disabled = false; btn.textContent = 'Save to Library'; }
     toast('Save failed — ' + (err.message || 'try again'), 'error');
   }
+}
+
+async function dislikeRecommendedResult(idx) {
+  const item = S.recommended.results[idx];
+  if (!item) return;
+
+  const btn = document.getElementById('rec-dislike-btn-' + idx);
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+
+  const title = pick(norm(item), 'title', 'channel');
+  const type  = pick(norm(item), 'type') || resultTab(item);
+
+  try {
+    await apiPost({ action: 'dislike', title, type }, { retries: 1, timeoutMs: 15000 });
+  } catch (_) {
+    // best-effort — remove from UI regardless
+  }
+
+  // Remove from in-memory results and re-render so the card disappears
+  S.recommended.results.splice(idx, 1);
+  renderRecommendedTab();
+  toast(`"${title}" won't be recommended again`, '');
 }
 
 /* ════════════════════════════════════════════════════════════
