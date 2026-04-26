@@ -361,6 +361,7 @@ function doPost(e) {
     if (action === 'deleteRow')         return respondJson(handleDeleteRow(body.sheetName, body.rowIndex));
     if (action === 'claudeSearch')      return respondJson(handleClaudeSearch(body.query, body.sheetName, body.clientDatetime));
     if (action === 'recommendForMe')    return respondJson(handleRecommendForMe());
+    if (action === 'dislike')           return respondJson(handleDislike(body.title, body.type));
     if (action === 'removeDuplicates')  return respondJson(removeDuplicatesFromSheet(body.sheetName));
     if (action === 'saveEpisodes')      return respondJson(handleSaveEpisodes(body.title, body.episodes));
     if (action === 'saveGames')         return respondJson(handleSaveGames(body.channelId, body.games));
@@ -1040,6 +1041,37 @@ function handleClaudeSearch(query, sheetName, clientDatetime) {
        ],
        note?: "<optional explanation, e.g. library too small>" }
 */
+/* ── Dislike a recommendation ────────────────────────────── */
+/* Appends a row to the "Disliked" sheet (created automatically on first use).
+   These titles are read back by handleRecommendForMe() and injected into the
+   prompt + post-filter so Claude never surfaces them again. */
+function handleDislike(title, type) {
+  if (!title || !String(title).trim()) return { error: 'Missing title' };
+  try {
+    var ss    = getSpreadsheet();
+    var sheet = ss.getSheetByName('Disliked');
+    if (!sheet) {
+      sheet = ss.insertSheet('Disliked');
+      sheet.getRange(1, 1, 1, 3).setValues([['title', 'type', 'disliked_at']]);
+    }
+    sheet.appendRow([String(title).trim(), String(type || '').trim(), new Date().toISOString()]);
+    return { success: true };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+/* ── Read all disliked titles (for recommendation exclusion) ─ */
+function readDislikedTitles() {
+  try {
+    var sheet = getSpreadsheet().getSheetByName('Disliked');
+    if (!sheet || sheet.getLastRow() < 2) return [];
+    return sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues()
+      .map(function(row) { return String(row[0] || '').toLowerCase().trim(); })
+      .filter(Boolean);
+  } catch (_) { return []; }
+}
+
 function handleRecommendForMe() {
   var settings = getSettings();
   if (!settingEnabled(settings, 'search_enabled')) {
@@ -1089,10 +1121,12 @@ function handleRecommendForMe() {
   var movieList = movies.map(digest).filter(Boolean).slice(0, 80);
   var showList  = shows.map(digest).filter(Boolean).slice(0, 80);
 
-  /* Excluded titles — never recommend something the user already has. */
+  /* Excluded titles — library content + anything the user explicitly disliked. */
+  var dislikedTitles = readDislikedTitles();
   var excludedTitles = []
     .concat(movies.map(function(m) { return String(m.title || '').toLowerCase().trim(); }))
     .concat(shows.map(function(s)  { return String(s.title || '').toLowerCase().trim(); }))
+    .concat(dislikedTitles)
     .filter(Boolean);
 
   var today = new Date();
@@ -1108,6 +1142,8 @@ function handleRecommendForMe() {
     (movieList.length ? '- ' + movieList.join('\n- ') : '(none)') + '\n\n' +
     'TV SHOWS THE USER HAS SAVED (' + showList.length + '):\n' +
     (showList.length ? '- ' + showList.join('\n- ') : '(none)') + '\n\n' +
+    'TITLES THE USER HAS EXPLICITLY DISLIKED — do NOT recommend these under any circumstances:\n' +
+    (dislikedTitles.length ? '- ' + dislikedTitles.join('\n- ') : '(none)') + '\n\n' +
     'Follow this four-phase framework strictly:\n\n' +
     'PHASE 1 — BUILD THE TASTE PROFILE BEFORE SEARCHING\n' +
     'Synthesize the list above (do not search yet):\n' +
