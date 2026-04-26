@@ -116,6 +116,239 @@ function invalidateCache() {
   try { CacheService.getScriptCache().remove(CACHE_KEY); } catch (_) {}
 }
 
+/* ═══════════════════════════════════════════════════════════
+   EXTERNAL SEARCH APIS
+   Three reliable, purpose-built data sources replace the
+   Claude web-search approach for initial content discovery:
+     • TVmaze  — TV show search + episode schedule (free, no key)
+     • TMDB    — Movie search + streaming providers (free API key)
+     • TheSportsDB — Sports team search + upcoming events (free key "3")
+   Claude is still used for card-level refreshes (richer narrative data).
+════════════════════════════════════════════════════════════ */
+
+function getTMDBKey() {
+  try { return PropertiesService.getScriptProperties().getProperty('TMDB_API_KEY') || ''; } catch (_) { return ''; }
+}
+function getSportsDBKey() {
+  try { return PropertiesService.getScriptProperties().getProperty('THESPORTSDB_API_KEY') || '3'; } catch (_) { return '3'; }
+}
+
+/* TMDB genre ID → name map (movie + TV IDs) */
+var TMDB_GENRES = {
+  28:'Action', 12:'Adventure', 16:'Animation', 35:'Comedy', 80:'Crime',
+  99:'Documentary', 18:'Drama', 10751:'Family', 14:'Fantasy', 36:'History',
+  27:'Horror', 10402:'Music', 9648:'Mystery', 10749:'Romance', 878:'Sci-Fi',
+  53:'Thriller', 10752:'War', 37:'Western', 10759:'Action & Adventure',
+  10762:'Kids', 10765:'Sci-Fi & Fantasy', 10768:'War & Politics'
+};
+function tmdbGenreNames(ids) {
+  if (!Array.isArray(ids) || !ids.length) return '';
+  return ids.slice(0, 2).map(function(id) { return TMDB_GENRES[id] || ''; }).filter(Boolean).join(', ');
+}
+
+/* ── Unified search dispatcher ───────────────────────────── */
+function handleSearch(query, searchType) {
+  var settings = getSettings();
+  if (!settingEnabled(settings, 'search_enabled')) {
+    return { error: 'Search is disabled. Set search_enabled = TRUE in the Settings sheet.' };
+  }
+  if (!query || !String(query).trim()) return { error: 'Missing search query' };
+
+  var type    = String(searchType || 'all').toLowerCase().replace(/s$/, ''); // normalise plurals
+  var results = [];
+  var errors  = [];
+
+  /* TV Shows — TVmaze (no key required) */
+  if (type === 'show' || type === 'all') {
+    try { results = results.concat(searchTVMaze(String(query))); }
+    catch (e) { errors.push('TVmaze: ' + e.message); }
+  }
+
+  /* Movies — TMDB (requires TMDB_API_KEY in Script Properties) */
+  if (type === 'movie' || type === 'all') {
+    var tmdbKey = getTMDBKey();
+    if (tmdbKey) {
+      try { results = results.concat(searchTMDBMovies(String(query), tmdbKey)); }
+      catch (e) { errors.push('TMDB: ' + e.message); }
+    } else if (type === 'movie') {
+      return { error: 'Movie search requires a TMDB_API_KEY. Add it in Apps Script → Project Settings → Script Properties.' };
+    }
+  }
+
+  /* Sports — TheSportsDB (free tier key "3") */
+  if (type === 'sport' || type === 'all') {
+    try { results = results.concat(searchTheSportsDB(String(query))); }
+    catch (e) { errors.push('TheSportsDB: ' + e.message); }
+  }
+
+  if (results.length === 0 && errors.length > 0) {
+    return { error: errors.join('; ') };
+  }
+
+  logSearch(query, searchType || 'all', results.length);
+  return { success: true, results: results };
+}
+
+/* ── TVmaze TV show search ───────────────────────────────── */
+function searchTVMaze(query) {
+  var resp = UrlFetchApp.fetch(
+    'https://api.tvmaze.com/search/shows?q=' + encodeURIComponent(query),
+    { muteHttpExceptions: true }
+  );
+  if (resp.getResponseCode() !== 200) return [];
+  var items = JSON.parse(resp.getContentText()) || [];
+  var shows = items.slice(0, 5).map(function(item) { return item.show || item; });
+
+  /* Fetch upcoming episodes for all matched shows in parallel */
+  var episodeRequests = shows.map(function(show) {
+    return show.id
+      ? { url: 'https://api.tvmaze.com/shows/' + show.id + '/episodes', muteHttpExceptions: true }
+      : null;
+  });
+  var epResponses = UrlFetchApp.fetchAll(episodeRequests.filter(Boolean));
+  var epMap = {}; // showId → upcoming episodes array
+  var epRespIdx = 0;
+  shows.forEach(function(show) {
+    if (!show.id) return;
+    var epResp = epResponses[epRespIdx++];
+    try {
+      if (epResp && epResp.getResponseCode() === 200) {
+        var allEps = JSON.parse(epResp.getContentText()) || [];
+        var todayMs = new Date().setHours(0, 0, 0, 0);
+        epMap[show.id] = allEps.filter(function(ep) {
+          return ep.airdate && new Date(ep.airdate).getTime() >= todayMs;
+        }).slice(0, 5);
+      }
+    } catch (_) {}
+  });
+
+  return shows.map(function(show) { return normalizeTVMazeShow(show, epMap[show.id] || []); });
+}
+
+function normalizeTVMazeShow(show, upcomingEps) {
+  var network  = (show.network && show.network.name) ||
+                 (show.webChannel && show.webChannel.name) || '';
+  var genres   = Array.isArray(show.genres) ? show.genres.slice(0, 2).join(', ') : '';
+  var summary  = (show.summary || '').replace(/<[^>]+>/g, '').trim().substring(0, 220);
+  var status   = show.status === 'Running' ? 'Returning' : (show.status || '');
+  var rating   = show.rating && show.rating.average ? String(show.rating.average) : '';
+  var premiered = (show.premiered || '').substring(0, 4);
+  var episodes = (upcomingEps || []).map(function(ep) {
+    return { season: ep.season, episode: ep.number, episode_title: ep.name || '', air_date: ep.airdate || '', network: network };
+  });
+  return {
+    type: 'Show',
+    title: show.name || '',
+    year: premiered,
+    genre: genres,
+    description: summary,
+    network: network,
+    streamingOn: network,
+    status: status,
+    nextAirs: episodes.length ? episodes[0].air_date : '',
+    imdbScore: rating,
+    episodes: episodes,
+    tvmazeId: show.id || ''
+  };
+}
+
+/* ── TMDB movie search ───────────────────────────────────── */
+function searchTMDBMovies(query, apiKey) {
+  var resp = UrlFetchApp.fetch(
+    'https://api.themoviedb.org/3/search/movie?api_key=' + apiKey +
+    '&query=' + encodeURIComponent(query) + '&language=en-US&page=1',
+    { muteHttpExceptions: true }
+  );
+  if (resp.getResponseCode() !== 200) return [];
+  var items = (JSON.parse(resp.getContentText()).results || []).slice(0, 5);
+  if (!items.length) return [];
+
+  /* Fetch US streaming providers for all results in parallel */
+  var providerResps = UrlFetchApp.fetchAll(items.map(function(item) {
+    return { url: 'https://api.themoviedb.org/3/movie/' + item.id + '/watch/providers?api_key=' + apiKey, muteHttpExceptions: true };
+  }));
+
+  return items.map(function(item, i) {
+    var streaming = '';
+    try {
+      var pr = providerResps[i];
+      if (pr && pr.getResponseCode() === 200) {
+        var us = JSON.parse(pr.getContentText()).results && JSON.parse(pr.getContentText()).results.US;
+        if (us && us.flatrate && us.flatrate.length) streaming = us.flatrate[0].provider_name;
+      }
+    } catch (_) {}
+    return {
+      type: 'Movie',
+      title: item.title || '',
+      year: (item.release_date || '').substring(0, 4),
+      genre: tmdbGenreNames(item.genre_ids),
+      description: (item.overview || '').substring(0, 220),
+      streamingOn: streaming,
+      imdbScore: item.vote_average ? String(Number(item.vote_average).toFixed(1)) : '',
+      tmdbId: item.id || ''
+    };
+  });
+}
+
+/* ── TheSportsDB sports team search ─────────────────────── */
+function searchTheSportsDB(query) {
+  var key  = getSportsDBKey();
+  var resp = UrlFetchApp.fetch(
+    'https://www.thesportsdb.com/api/v1/json/' + key + '/searchteams.php?t=' + encodeURIComponent(query),
+    { muteHttpExceptions: true }
+  );
+  if (resp.getResponseCode() !== 200) return [];
+  var teams = (JSON.parse(resp.getContentText()).teams || []).slice(0, 5);
+  if (!teams.length) return [];
+
+  /* Fetch upcoming events for all teams in parallel */
+  var eventResps = UrlFetchApp.fetchAll(teams.map(function(team) {
+    return { url: 'https://www.thesportsdb.com/api/v1/json/' + key + '/eventsnext.php?id=' + team.idTeam, muteHttpExceptions: true };
+  }));
+
+  return teams.map(function(team, i) {
+    var games = [];
+    try {
+      var er = eventResps[i];
+      if (er && er.getResponseCode() === 200) {
+        var events = JSON.parse(er.getContentText()).events || [];
+        games = events.slice(0, 5).map(function(ev) {
+          var opp = ev.strHomeTeam === team.strTeam ? ev.strAwayTeam : ev.strHomeTeam;
+          return { date: ev.dateEvent || '', time: ev.strTime || '', opponent: opp, tv_channel: ev.strTVStation || '' };
+        });
+      }
+    } catch (_) {}
+    var next = games.length ? (games[0].date + (games[0].time ? ' ' + games[0].time : '') + (games[0].opponent ? ' vs ' + games[0].opponent : '')) : '';
+    return {
+      type: 'LiveTV',
+      channel: team.strTeam || '',
+      league: team.strLeague || '',
+      description: (team.strDescriptionEN || '').replace(/<[^>]+>/g, '').substring(0, 220),
+      genre: 'Sports',
+      network: team.strLeague || '',
+      nextGame: next.trim(),
+      games: games,
+      sportsdbId: team.idTeam || ''
+    };
+  });
+}
+
+/* ── Log searches to SearchLogs sheet (best-effort) ─────── */
+function logSearch(query, type, count) {
+  try {
+    var ss    = getSpreadsheet();
+    var sheet = ss.getSheetByName('SearchLogs');
+    if (!sheet) return;
+    ensureColumns(sheet, ['timestamp', 'search_term', 'search_type', 'results_count']);
+    appendByHeaders(sheet, {
+      timestamp:     new Date().toISOString(),
+      search_term:   query,
+      search_type:   type,
+      results_count: count
+    });
+  } catch (_) {}
+}
+
 /* ── Routing ─────────────────────────────────────────────── */
 function doGet(e) {
   try {
@@ -139,6 +372,7 @@ function doPost(e) {
     var body   = JSON.parse(e.postData.contents);
     var action = body.action;
 
+    if (action === 'search')            return respondJson(handleSearch(body.query, body.searchType));
     if (action === 'addRow')            return respondJson(handleAddRow(body.sheetName, body.rowData));
     if (action === 'updateRow')         return respondJson(handleUpdateRow(body.sheetName, body.rowIndex, body.rowData));
     if (action === 'deleteRow')         return respondJson(handleDeleteRow(body.sheetName, body.rowIndex));
