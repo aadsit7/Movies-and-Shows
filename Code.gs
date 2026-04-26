@@ -430,6 +430,7 @@ function fetchAllMediaFromSheet() {
       var headers    = normalizeHeaders(rawData[0]);
       var seenMovies = {};
       var seenShows  = {};
+      var seenLiveC  = {};
       for (var i = 1; i < rawData.length; i++) {
         var row = buildObj(headers, rawData[i]);
         var key = String(row['title'] || '').toLowerCase().trim();
@@ -437,15 +438,35 @@ function fetchAllMediaFromSheet() {
         var item = projectFields(row, CONTENT_FIELDS);
         item.rowIndex = i + 1;
         var ctRaw = String(row['content_type'] || '').trim();
+        var fmt   = String(row['format']       || '').trim().toLowerCase();
         var ct    = ctRaw.toLowerCase();
-        if (ct === 'movie') {
+
+        // Infer content_type when blank: check format column, then default to TV Show
+        if (!ct) {
+          ct = (fmt === 'movie' || fmt === 'film') ? 'movie' : 'tv show';
+        }
+
+        if (ct === 'movie' || ct === 'film') {
           if (seenMovies[key]) continue;
           seenMovies[key] = true;
           movies.push(item);
-        } else if (ct === 'tv show' || ct === 'show' || ct === 'series') {
+        } else if (ct === 'tv show' || ct === 'show' || ct === 'series' ||
+                   ct === 'mini-series' || ct === 'limited series' || ct === 'miniseries') {
           if (seenShows[key]) continue;
           seenShows[key] = true;
           shows.push(item);
+        } else if (ct === 'sports' || ct === 'sport' || ct === 'live event' ||
+                   ct === 'live tv' || ct === 'live') {
+          // Sports/Live-TV rows in Content_Master: map into liveTV list
+          if (seenLiveC[key]) continue;
+          seenLiveC[key] = true;
+          liveTV.push({
+            favorite_team_or_channel: String(row['title'] || '').trim(),
+            live_tv_type:             ctRaw || fmt || 'Sports',
+            league:                   String(row['genre_primary'] || '').trim(),
+            description:              String(row['description']   || '').trim(),
+            rowIndex:                 i + 1,
+          });
         }
       }
     }
