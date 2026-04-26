@@ -1230,7 +1230,7 @@
   <header id="app-header">
     <h1 class="app-title">Family Media Tracker</h1>
     <button class="header-refresh" style="right:48px" onclick="switchTab('settings')" aria-label="Settings" title="Settings">⚙️</button>
-    <button class="header-refresh" onclick="loadAllData()" aria-label="Refresh" title="Refresh">↻</button>
+    <button class="header-refresh" onclick="loadAllData({ force: true })" aria-label="Refresh" title="Refresh">↻</button>
   </header>
 
   <!-- Sub-header: search bar / settings title -->
@@ -1316,7 +1316,7 @@
    CONSTANTS & CONFIG
 ════════════════════════════════════════════════════════════ */
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzcXxFOz7wJGP4Zidt9HkFhhAMVUSivV6NLL8noP_Slkb0vFcwIFxB220plyVUlL7ymfw/exec';
-const APP_VERSION     = '1.1.0';
+const APP_VERSION     = '1.2.0';
 
 /* ── Streaming platform brand colours ───────────────────── */
 const PLATFORM_COLORS = {
@@ -1373,17 +1373,21 @@ const S = {
 };
 
 /* ── Search index (rebuilt on data change, reused on every keystroke) ── */
-let searchIndex  = [];  // [{raw, tab, idx, titleLc, airsDate, haystack}]
-let _indexDirty  = true;
-let _filterTimer = null;
+let searchIndex   = [];  // [{raw, tab, idx, titleLc, airsDate, haystack}]
+let _indexDirty   = true;
+let _filterTimer  = null;
+let _loadInFlight = null;   // deduplicates concurrent loadAllData() calls
+const DATA_STALE_MS = 5 * 60 * 1000;  // 5 min — don't re-fetch fresher than this
 
 /* ── Local-storage cache (instant display on re-open) ───── */
-const LS_CACHE_KEY = 'fmtCache_v2';
-const LS_SYNC_KEY  = 'fmtLastSync_v2';   // timestamp of last auto-schedule-sync
+const LS_CACHE_KEY    = 'fmtCache_v2';
+const LS_SYNC_KEY     = 'fmtLastSync_v2';   // timestamp of last auto-schedule-sync
+const CACHE_SCHEMA_V  = 3;                  // bump when data shape changes to auto-clear old caches
 
 function saveCache() {
   try {
     localStorage.setItem(LS_CACHE_KEY, JSON.stringify({
+      v:      CACHE_SCHEMA_V,
       movies: S.movies,
       shows:  S.shows,
       livetv: S.livetv,
@@ -1397,7 +1401,8 @@ function restoreCache() {
     const raw = localStorage.getItem(LS_CACHE_KEY);
     if (!raw) return false;
     const d = JSON.parse(raw);
-    if (!d || !Array.isArray(d.shows)) return false;
+    /* Reject caches written by an older schema version */
+    if (!d || d.v !== CACHE_SCHEMA_V || !Array.isArray(d.shows)) return false;
     S.movies     = d.movies || [];
     S.shows      = d.shows  || [];
     S.livetv     = d.livetv || [];
@@ -1621,26 +1626,55 @@ function toast(msg, type = '') {
 }
 
 /* ════════════════════════════════════════════════════════════
-   API
+   API  — timeout + retry helpers
 ════════════════════════════════════════════════════════════ */
+
+/* Wrap fetch with an AbortController timeout. */
+function fetchWithTimeout(url, opts, timeoutMs) {
+  const ctrl    = new AbortController();
+  const timer   = setTimeout(() => ctrl.abort(), timeoutMs);
+  return fetch(url, { ...opts, signal: ctrl.signal })
+    .finally(() => clearTimeout(timer));
+}
+
+/* GET with 30 s timeout, no retry (read-only, cheap to re-call). */
 async function apiGet(params) {
   const url = new URL(APPS_SCRIPT_URL);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  const res = await fetch(url.toString(), { method: 'GET', redirect: 'follow' });
+  let res;
+  try {
+    res = await fetchWithTimeout(url.toString(), { method: 'GET', redirect: 'follow' }, 30000);
+  } catch (err) {
+    throw new Error(err.name === 'AbortError' ? 'Request timed out — check connection' : err.message);
+  }
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
 }
 
-async function apiPost(body) {
-  // text/plain skips the CORS preflight that Apps Script can't answer.
-  const res = await fetch(APPS_SCRIPT_URL, {
+/* POST with 120 s timeout (Claude calls can take ~60 s) and 2 auto-retries
+   for transient network errors.  Uses text/plain to skip CORS preflight. */
+async function apiPost(body, { retries = 2, timeoutMs = 120000 } = {}) {
+  const opts = {
     method:   'POST',
     headers:  { 'Content-Type': 'text/plain;charset=utf-8' },
     body:     JSON.stringify(body),
     redirect: 'follow',
-  });
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  return res.json();
+  };
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 1500));
+    try {
+      const res = await fetchWithTimeout(APPS_SCRIPT_URL, opts, timeoutMs);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    } catch (err) {
+      if (err.name === 'AbortError') throw new Error('Request timed out — try again');
+      lastErr = err;
+      /* Don't retry on HTTP 4xx (client errors) */
+      if (err.message && /^HTTP 4/.test(err.message)) throw err;
+    }
+  }
+  throw lastErr;
 }
 
 async function getAllMedia() {
@@ -1694,7 +1728,7 @@ function switchTab(tab) {
 
   if (tab === 'upcoming') {
     renderScheduleTab();
-    loadAllData();
+    loadAllData();  // staleness guard inside loadAllData prevents redundant fetches
     return;
   }
 
@@ -1958,7 +1992,19 @@ function renderLibrary() {
 /* ════════════════════════════════════════════════════════════
    DATA LOADING
 ════════════════════════════════════════════════════════════ */
-function loadAllData() {
+/* loadAllData — fetches from the sheet with:
+   • In-flight deduplication: concurrent calls share one request
+   • Staleness guard: skips fetch if data is < DATA_STALE_MS old
+   • forceRefresh bypasses both guards (used by manual refresh button) */
+function loadAllData({ force = false } = {}) {
+  /* If data is fresh enough and not being forced, use what we have */
+  if (!force && S.lastSynced && (Date.now() - S.lastSynced.getTime()) < DATA_STALE_MS) {
+    return Promise.resolve();
+  }
+
+  /* Return the in-flight promise if one is already running */
+  if (_loadInFlight) return _loadInFlight;
+
   const libGrid = document.getElementById('grid-library');
   if (libGrid && !libGrid.querySelector('.media-card')) {
     libGrid.innerHTML = Array.from({ length: 6 }, () => `
@@ -1969,7 +2015,12 @@ function loadAllData() {
         <div class="skel skel-desc"></div>
       </div>`).join('');
   }
-  return fetch(APPS_SCRIPT_URL + '?action=getAllMedia&forceRefresh=true', { redirect: 'follow' })
+
+  _loadInFlight = fetchWithTimeout(
+    APPS_SCRIPT_URL + '?action=getAllMedia&forceRefresh=true',
+    { redirect: 'follow' },
+    30000
+  )
     .then(r => {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.text();
@@ -1998,14 +2049,17 @@ function loadAllData() {
           <p>Check that the Apps Script is deployed and the spreadsheet exists.</p>
           ${detail}
           <button class="btn btn-secondary btn-sm" style="margin-top:14px"
-            onclick="loadAllData()">Try Again</button>
+            onclick="loadAllData({ force: true })">Try Again</button>
         </div>`;
       if (libGrid) libGrid.innerHTML = errHtml;
       const schedBody = document.getElementById('schedule-body');
       if (schedBody && !schedBody.querySelector('.schedule-day-section')) {
         schedBody.innerHTML = errHtml;
       }
-    });
+    })
+    .finally(() => { _loadInFlight = null; });
+
+  return _loadInFlight;
 }
 
 function renderMovies(items) {
@@ -2339,7 +2393,7 @@ async function refreshScheduleFromSheet() {
   if (btn) { btn.disabled = true; btn.querySelector('.ua-icon').style.animation = 'spin 0.8s linear infinite'; }
 
   try {
-    await loadAllData();
+    await loadAllData({ force: true });
   } catch (err) {
     console.warn('refreshScheduleFromSheet:', err);
     toast('Refresh failed — check connection', 'error');
@@ -3595,7 +3649,7 @@ async function updateAll() {
 
   // pull authoritative data back from the spreadsheet so the menu
   // reflects exactly what was just written
-  try { await loadAllData(); } catch (err) { console.warn('updateAll reload:', err); }
+  try { await loadAllData({ force: true }); } catch (err) { console.warn('updateAll reload:', err); }
 
   S.lastSynced    = new Date();
   S.refreshingAll = false;
@@ -3692,6 +3746,9 @@ async function deduplicateAll(silent = false) {
    and caps at 3 items per session to stay within quota.
 ════════════════════════════════════════════════════════════ */
 async function autoSyncMissingSchedules() {
+  /* Skip if the URL hasn't been configured yet */
+  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes('YOUR_SCRIPT_ID')) return;
+
   // Throttle: skip if we already ran within the last 6 hours.
   try {
     const last = parseInt(localStorage.getItem(LS_SYNC_KEY) || '0', 10);
