@@ -2128,11 +2128,17 @@ function renderLibrary() {
   // Filter by type chip
   let entries;
   if (type === 'upcoming') {
-    // Only shows + live TV with a date coming up (within last 36h or future)
-    entries = searchIndex.filter(e =>
-      (e.tab === 'shows' || e.tab === 'livetv') &&
-      e.airsDate && e.airsDate.getTime() > cutoff
-    );
+    // Only shows + live TV with a date coming up (within last 36h or future).
+    // For shows, also require status === "Active" (Ended/anything else is hidden).
+    entries = searchIndex.filter(e => {
+      if (e.tab !== 'shows' && e.tab !== 'livetv') return false;
+      if (!e.airsDate || e.airsDate.getTime() <= cutoff) return false;
+      if (e.tab === 'shows') {
+        const status = (pick(norm(e.raw), 'status') || '').trim().toLowerCase();
+        if (status !== 'active') return false;
+      }
+      return true;
+    });
     if (!words.length) entries.sort((a, b) => a.airsDate - b.airsDate);
   } else if (type === 'all') {
     entries = searchIndex.slice();
@@ -2394,6 +2400,10 @@ function collectUpcoming(tab) {
 
   src.forEach((raw, idx) => {
     const n = norm(raw);
+    if (tab === 'shows') {
+      const status = (pick(n, 'status') || '').trim().toLowerCase();
+      if (status !== 'active') return; // only Active shows appear in upcoming
+    }
     const text = tab === 'shows'
       ? pick(n, 'nextairs', 'nextairing', 'airing', 'airs', 'whenitairs')
       : pick(n, 'nextgame', 'next_game', 'nextairs', 'nextairing', 'airing');
