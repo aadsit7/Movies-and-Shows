@@ -1217,6 +1217,48 @@
     .divider { height: 1px; background: var(--border); margin: 10px 0; }
     .text-muted { color: var(--text-2); }
     .text-sm    { font-size: 13px; }
+
+    /* ── Search tab ───────────────────────────────────────── */
+    .search-type-chips {
+      display: flex; gap: 6px; flex-wrap: wrap; padding: 14px 16px 0;
+    }
+    .search-type-chip {
+      padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 500;
+      border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
+      cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+      white-space: nowrap;
+    }
+    .search-type-chip.active {
+      background: var(--accent); color: #000; border-color: var(--accent);
+    }
+    .search-input-row {
+      display: flex; gap: 8px; padding: 10px 16px 0; align-items: center;
+    }
+    .search-input-row input {
+      flex: 1; padding: 10px 14px; border-radius: 10px; font-size: 15px;
+      border: 1px solid var(--border); background: var(--surface); color: var(--text);
+      outline: none;
+    }
+    .search-input-row input:focus { border-color: var(--accent); }
+    .search-results-list { padding: 12px 16px 32px; }
+    .search-result-card {
+      background: var(--surface); border-radius: 14px; padding: 14px;
+      margin-bottom: 12px; border: 1px solid var(--border);
+    }
+    .search-result-card .result-title {
+      font-size: 16px; font-weight: 700; margin-bottom: 4px;
+    }
+    .search-result-card .result-meta {
+      font-size: 12px; color: var(--text-2); margin-bottom: 6px; display: flex; gap: 6px; flex-wrap: wrap;
+    }
+    .source-tag {
+      font-size: 11px; color: var(--text-3); background: var(--bg);
+      border-radius: 6px; padding: 2px 6px; border: 1px solid var(--border);
+    }
+    .search-empty {
+      padding: 40px 16px; text-align: center; color: var(--text-2);
+    }
+    .search-empty .big-icon { font-size: 44px; margin-bottom: 10px; }
   </style>
 </head>
 <body>
@@ -1226,10 +1268,9 @@
 ════════════════════════════════════════════════════════════ -->
 <div id="app">
 
-  <!-- Top header: app title centered + settings + refresh icons -->
+  <!-- Top header: app title + refresh icon -->
   <header id="app-header">
     <h1 class="app-title">Family Media Tracker</h1>
-    <button class="header-refresh" style="right:48px" onclick="switchTab('settings')" aria-label="Settings" title="Settings">⚙️</button>
     <button class="header-refresh" onclick="loadAllData({ force: true })" aria-label="Refresh" title="Refresh">↻</button>
   </header>
 
@@ -1238,14 +1279,19 @@
 
   <!-- Scrollable content -->
   <div id="content">
-    <!-- Library tab (movies + shows + live TV combined) -->
-    <div id="tab-shows" class="tab-panel">
+    <!-- Guide tab (all saved favorites: movies + shows + live TV) -->
+    <div id="tab-shows" class="tab-panel active">
       <div id="upcoming-library" class="upcoming-section"></div>
       <div class="cards-grid" id="grid-library"></div>
     </div>
 
-    <!-- Upcoming tab -->
-    <div id="tab-upcoming" class="tab-panel active">
+    <!-- Search tab (search online for new content to add) -->
+    <div id="tab-search" class="tab-panel">
+      <!-- filled by renderSearchTab() -->
+    </div>
+
+    <!-- Schedule tab (upcoming episodes, movies, sports) -->
+    <div id="tab-upcoming" class="tab-panel">
       <div id="schedule-body"></div>
     </div>
 
@@ -1256,28 +1302,25 @@
     </div>
   </div>
 
-  <!-- Bottom navigation (4 tabs) -->
+  <!-- Bottom navigation: Guide | Search | Schedule | Settings -->
   <nav id="bottom-nav">
-    <button class="nav-btn active" id="nav-upcoming" onclick="switchTab('upcoming')">
-      <span class="nav-icon">📅</span>Upcoming
+    <button class="nav-btn active" id="nav-guide" onclick="switchTab('guide')">
+      <span class="nav-icon">📚</span>Guide
     </button>
-    <button class="nav-btn" id="nav-tab-movies"
-      onclick="switchTab('shows');setLibraryType('movies');document.querySelectorAll('#bottom-nav .nav-btn').forEach(b=>b.classList.remove('active'));this.classList.add('active')">
-      <span class="nav-icon">🎬</span>Movies
+    <button class="nav-btn" id="nav-search" onclick="switchTab('search')">
+      <span class="nav-icon">🔍</span>Search
     </button>
-    <button class="nav-btn" id="nav-shows"
-      onclick="switchTab('shows');setLibraryType('shows');document.querySelectorAll('#bottom-nav .nav-btn').forEach(b=>b.classList.remove('active'));this.classList.add('active')">
-      <span class="nav-icon">📺</span>Shows
+    <button class="nav-btn" id="nav-schedule" onclick="switchTab('schedule')">
+      <span class="nav-icon">📅</span>Schedule
     </button>
-    <button class="nav-btn" id="nav-tab-livetv"
-      onclick="switchTab('shows');setLibraryType('livetv');document.querySelectorAll('#bottom-nav .nav-btn').forEach(b=>b.classList.remove('active'));this.classList.add('active')">
-      <span class="nav-icon">📡</span>Live TV
+    <button class="nav-btn" id="nav-settings" onclick="switchTab('settings')">
+      <span class="nav-icon">⚙️</span>Settings
     </button>
   </nav>
 </div>
 
 <!-- Floating + button (visible on schedule and library tabs) -->
-<button id="fab" onclick="openSheet()">+</button>
+<button id="fab" onclick="switchTab('search')" title="Search to add">🔍</button>
 
 <!-- Bottom sheet scrim -->
 <div class="sheet-scrim" id="sheet-scrim" onclick="closeSheet()"></div>
@@ -1316,7 +1359,7 @@
    CONSTANTS & CONFIG
 ════════════════════════════════════════════════════════════ */
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzcXxFOz7wJGP4Zidt9HkFhhAMVUSivV6NLL8noP_Slkb0vFcwIFxB220plyVUlL7ymfw/exec';
-const APP_VERSION     = '1.2.0';
+const APP_VERSION     = '1.3.0';
 
 /* ── Streaming platform brand colours ───────────────────── */
 const PLATFORM_COLORS = {
@@ -1360,16 +1403,21 @@ const S = {
   movies:       [],
   shows:        [],
   livetv:       [],
-  tab:          'upcoming',
-  libraryType:  'all',   // 'all' | 'movies' | 'shows' | 'livetv'
+  tab:          'shows',   // internal key: 'shows' | 'upcoming' | 'search' | 'settings'
+  libraryType:  'all',     // 'all' | 'movies' | 'shows' | 'livetv'
   filter:       { shows: '', upcoming: '', schedule: '', settings: '' },
-  connStatus:   null,   // 'ok' | 'err' | null
+  connStatus:   null,      // 'ok' | 'err' | null
   lastSynced:   null,
   refreshingAll:  false,
-  updateProgress: '',   // "3 / 12 · Severance" while Update All is running
-  sheetPreview:   null, // result object currently shown in sheet/settings
+  updateProgress: '',      // "3 / 12 · Severance" while Update All is running
+  sheetPreview:   null,    // result object currently shown in sheet/settings
   calendarView:   false,
-  calendarWeek:   0,    // week offset from current week (0 = this week)
+  calendarWeek:   0,       // week offset from current week (0 = this week)
+  search: {
+    type:    'all',        // 'all' | 'shows' | 'movies' | 'sports'
+    query:   '',
+    results: [],
+  },
 };
 
 /* ── Search index (rebuilt on data change, reused on every keystroke) ── */
@@ -1681,6 +1729,13 @@ async function getAllMedia() {
   return apiGet({ action: 'getAllMedia' });
 }
 
+/* Search online via TMDB / TVmaze / TheSportsDB (not Claude).
+   Returns { success, results: [] } or { error } */
+async function searchOnline(query, type) {
+  return apiPost({ action: 'search', query, searchType: type || 'all' },
+                 { retries: 1, timeoutMs: 45000 });
+}
+
 async function claudeSearch(query, sheet = null) {
   const body = { action: 'claudeSearch', query };
   if (sheet) body.sheetName = sheet;
@@ -1703,45 +1758,46 @@ async function deleteRow(tab, rowIndex) {
 /* ════════════════════════════════════════════════════════════
    TAB SWITCHING
 ════════════════════════════════════════════════════════════ */
-function switchTab(tab) {
+/* Public tab keys used in nav: 'guide' | 'search' | 'schedule' | 'settings'
+   These map to internal panel/state keys so the 60+ places that check
+   S.tab, S.filter.shows, etc. don't need to change. */
+const TAB_ALIAS = { guide: 'shows', schedule: 'upcoming' };
+
+function switchTab(publicTab) {
+  const tab = TAB_ALIAS[publicTab] || publicTab; // resolve alias → internal key
   S.tab = tab;
 
   // panel visibility
   document.querySelectorAll('.tab-panel').forEach(el => el.classList.remove('active'));
-  document.getElementById('tab-' + tab).classList.add('active');
+  const panel = document.getElementById('tab-' + tab);
+  if (panel) panel.classList.add('active');
 
-  // nav highlight
+  // nav highlight — match by public tab name
   document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
-  const navBtn = document.getElementById('nav-' + tab);
+  const navBtn = document.getElementById('nav-' + publicTab);
   if (navBtn) navBtn.classList.add('active');
 
-  // FAB: show on all content tabs (hide only on settings)
-  document.getElementById('fab').classList.toggle('hidden', tab === 'settings');
+  // FAB: hide on search and settings tabs
+  document.getElementById('fab').classList.toggle('hidden',
+    publicTab === 'settings' || publicTab === 'search');
 
-  // render sub-header
   renderSubHeader(tab);
 
-  if (tab === 'settings') {
-    renderSettings();
-    return;
-  }
+  if (tab === 'settings') { renderSettings(); return; }
+  if (tab === 'search')   { renderSearchTab(); return; }
 
   if (tab === 'upcoming') {
     renderScheduleTab();
-    loadAllData();  // staleness guard inside loadAllData prevents redundant fetches
+    loadAllData();
     return;
   }
 
-  // Library tab ('shows'): always rebuild index so newly added items appear
+  // Guide / Library tab
   if (tab === 'shows') {
     _indexDirty = true;
     const grid = document.getElementById('grid-library');
-    // Reload data if there are no real media cards (covers error/skeleton/empty states)
-    if (!grid || !grid.querySelector('.media-card')) {
-      loadAllData();
-    } else {
-      renderLibrary();
-    }
+    if (!grid || !grid.querySelector('.media-card')) loadAllData();
+    else renderLibrary();
   }
 }
 
@@ -3817,27 +3873,211 @@ async function autoSyncMissingSchedules() {
 }
 
 /* ════════════════════════════════════════════════════════════
+   SEARCH TAB
+════════════════════════════════════════════════════════════ */
+function renderSearchTab() {
+  const panel = document.getElementById('tab-search');
+  if (!panel) return;
+
+  const chips = [
+    { key: 'all',    label: 'All' },
+    { key: 'shows',  label: '📺 TV Shows' },
+    { key: 'movies', label: '🎬 Movies' },
+    { key: 'sports', label: '🏆 Sports' },
+  ];
+
+  panel.innerHTML = `
+    <div class="search-type-chips">
+      ${chips.map(c => `
+        <button class="search-type-chip${S.search.type === c.key ? ' active' : ''}"
+          onclick="setSearchType('${c.key}')">${c.label}</button>
+      `).join('')}
+    </div>
+    <div class="search-input-row">
+      <input type="search" id="search-tab-input"
+        placeholder="TV show, movie, or sports team…"
+        value="${esc(S.search.query)}"
+        autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+        onkeydown="if(event.key==='Enter') doSearch()">
+      <button class="btn btn-primary btn-sm" id="search-tab-btn" onclick="doSearch()">Search</button>
+    </div>
+    <div class="search-results-list" id="search-results">
+      ${S.search.results.length
+        ? renderSearchResults(S.search.results)
+        : `<div class="search-empty">
+             <div class="big-icon">🔍</div>
+             <p>Search for a TV show, movie, or sports team to add to your library.</p>
+           </div>`}
+    </div>`;
+
+  setTimeout(() => document.getElementById('search-tab-input')?.focus(), 250);
+}
+
+function setSearchType(type) {
+  S.search.type = type;
+  document.querySelectorAll('.search-type-chip').forEach(el => {
+    el.classList.toggle('active',
+      el.textContent.trim() === (type === 'all' ? 'All' : type === 'shows' ? '📺 TV Shows' : type === 'movies' ? '🎬 Movies' : '🏆 Sports')
+    );
+  });
+}
+
+async function doSearch() {
+  const input    = document.getElementById('search-tab-input');
+  const query    = (input?.value || '').trim();
+  const resultEl = document.getElementById('search-results');
+  if (!query) {
+    if (resultEl) resultEl.innerHTML = `<p style="color:var(--error);padding:16px 0;font-size:14px">Enter something to search.</p>`;
+    input?.focus();
+    return;
+  }
+
+  S.search.query = query;
+  const btn = document.getElementById('search-tab-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Searching…'; }
+  if (resultEl) resultEl.innerHTML = `<div class="loading-row"><div class="spinner"></div>Searching ${S.search.type === 'all' ? 'TV, movies & sports' : S.search.type}…</div>`;
+
+  try {
+    const raw = await searchOnline(query, S.search.type);
+    if (raw?.error) throw new Error(raw.error);
+    S.search.results = Array.isArray(raw?.results) ? raw.results : [];
+    if (resultEl) resultEl.innerHTML = renderSearchResults(S.search.results, raw?.errors);
+  } catch (err) {
+    console.error('doSearch:', err);
+    let msg = err.message || 'please try again';
+    if (msg.toLowerCase().includes('tmdb_api_key')) msg = 'Movie search requires a TMDB API key — set TMDB_API_KEY in Apps Script Script Properties.';
+    if (resultEl) resultEl.innerHTML = `<p style="color:var(--error);padding:16px 0;font-size:14px">Search failed — ${esc(msg)}</p>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Search'; }
+  }
+}
+
+function renderSearchResults(results, apiErrors) {
+  if (!results?.length) {
+    const errNote = apiErrors?.length
+      ? `<p style="font-size:12px;color:var(--error);margin-top:8px">${esc(apiErrors.join('; '))}</p>` : '';
+    return `<div class="search-empty"><div class="big-icon">😶</div><p>No results found — try a different title.</p>${errNote}</div>`;
+  }
+  return results.filter(Boolean).map((item, i) => {
+    const n         = norm(item);
+    const title     = pick(n, 'title', 'channel') || 'Untitled';
+    const year      = pick(n, 'year', 'year_started');
+    const genre     = pick(n, 'genre', 'genre_primary');
+    const desc      = pick(n, 'description');
+    const streaming = pick(n, 'streamingon', 'streaming');
+    const network   = pick(n, 'network');
+    const imdb      = pick(n, 'imdbscore', 'imdb');
+    const status    = pick(n, 'status');
+    const nextAirs  = pick(n, 'nextairs', 'nextairing');
+    const nextGame  = pick(n, 'nextgame', 'next_game');
+    const league    = pick(n, 'league');
+    const source    = pick(n, 'source');
+    const tab       = resultTab(item);
+    const typeLabel = tab === 'movies' ? 'Movie' : tab === 'shows' ? 'TV Show' : 'Sports / Live TV';
+    const typeClass = tab === 'movies' ? 'type-movie' : tab === 'shows' ? 'type-show' : 'type-livetv';
+    const ps        = platformStyle(streaming || network);
+
+    return `
+      <div class="search-result-card">
+        <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;margin-bottom:6px">
+          <div class="result-title" style="flex:1;min-width:0">${esc(title)}</div>
+          <span class="type-badge ${typeClass}">${typeLabel}</span>
+        </div>
+        <div class="result-meta">
+          ${year   ? `<span>${esc(year)}</span>` : ''}
+          ${genre  ? `<span>· ${esc(genre)}</span>` : ''}
+          ${league ? `<span>· ${esc(league)}</span>` : ''}
+          ${status ? `<span>· ${esc(status)}</span>` : ''}
+        </div>
+        ${(streaming || network) ? `<div style="margin-bottom:6px"><span class="platform-badge" style="background:${ps.bg};color:${ps.fg}">${esc(streaming || network)}</span></div>` : ''}
+        ${imdb ? `<div style="margin-bottom:6px"><span class="imdb-badge">⭐ ${esc(imdb)}</span></div>` : ''}
+        ${nextAirs ? `<div style="font-size:12px;color:var(--text-2);margin-bottom:4px">📅 Next airs: ${esc(nextAirs)}</div>` : ''}
+        ${nextGame ? `<div style="font-size:12px;color:var(--text-2);margin-bottom:4px">🏟️ Next game: ${esc(nextGame)}</div>` : ''}
+        ${desc ? `<p style="font-size:13px;color:var(--text-2);line-height:1.5;margin:6px 0 10px">${esc(desc.substring(0,200))}${desc.length>200?'…':''}</p>` : ''}
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn btn-primary btn-sm" style="flex:1" id="save-btn-${i}"
+            onclick="saveSearchResult(${i})">Save to Library</button>
+          ${source ? `<span class="source-tag">${esc(source)}</span>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function saveSearchResult(idx) {
+  const item = S.search.results[idx];
+  if (!item) return;
+  const btn = document.getElementById('save-btn-' + idx);
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+
+  try {
+    const tab    = resultTab(item);
+    const result = await addRow(tab, item);
+
+    if (result?.duplicate) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Already saved ✓'; }
+      toast('Already in your library!', '');
+      return;
+    }
+    if (result?.error) throw new Error(result.error);
+
+    if (tab === 'movies')     S.movies.push(item);
+    else if (tab === 'shows') S.shows.push(item);
+    else                      S.livetv.push(item);
+    _indexDirty = true;
+
+    if (btn) { btn.textContent = 'Saved ✓'; }
+    toast(`"${pick(norm(item), 'title', 'channel')}" added!`, 'success');
+
+    // Also save episodes/games to schedule sheets if available
+    const type = String(item.type || '').toLowerCase();
+    if (Array.isArray(item.episodes) && item.episodes.length && type.includes('show')) {
+      apiPost({ action: 'saveEpisodes', title: item.title, episodes: item.episodes }).catch(() => {});
+    }
+    if (Array.isArray(item.games) && item.games.length &&
+        (type.includes('live') || type.includes('sport'))) {
+      apiPost({ action: 'saveGames', channelId: item.channel || item.title, games: item.games }).catch(() => {});
+    }
+
+    loadAllData();
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Save to Library'; }
+    toast('Save failed — ' + (err.message || 'try again'), 'error');
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
    INIT
 ════════════════════════════════════════════════════════════ */
 (function init() {
-  S.tab = 'upcoming';
-  renderSubHeader('upcoming');
+  // Start on Guide tab (shows the library)
+  S.tab = 'shows';
+  renderSubHeader('shows');
 
-  // Restore last-known data from localStorage so the schedule is visible instantly.
+  // Mark the Guide nav button as active
+  document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+  const guideBtn = document.getElementById('nav-guide');
+  if (guideBtn) guideBtn.classList.add('active');
+
+  // Show tab-shows panel, hide others
+  document.querySelectorAll('.tab-panel').forEach(el => el.classList.remove('active'));
+  const guidePanel = document.getElementById('tab-shows');
+  if (guidePanel) guidePanel.classList.add('active');
+
+  // Restore cached data for instant display
   const hasCached = restoreCache();
   if (hasCached) {
-    renderScheduleTab();
+    renderLibrary();
   } else {
-    const schedBody = document.getElementById('schedule-body');
-    if (schedBody) schedBody.innerHTML = `
-      <div class="empty-state">
-        <div class="big-icon" style="animation:spin 1s linear infinite;display:inline-block">↻</div>
-        <p>Loading upcoming…</p>
-      </div>`;
+    const libGrid = document.getElementById('grid-library');
+    if (libGrid) libGrid.innerHTML = Array.from({ length: 6 }, () => `
+      <div class="skeleton-card">
+        <div class="skel skel-title"></div>
+        <div class="skel skel-sub"></div>
+        <div class="skel skel-badge" style="margin:10px 0 6px"></div>
+        <div class="skel skel-desc"></div>
+      </div>`).join('');
   }
 
-  // Always fetch fresh data from the Google Sheet, then dedup and auto-fill
-  // any missing next_airs / next_game fields by asking Claude.
   loadAllData()
     .then(() => deduplicateAll(true))
     .then(() => autoSyncMissingSchedules())
