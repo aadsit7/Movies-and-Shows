@@ -2823,11 +2823,17 @@ function collectThisWeek() {
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const days = {};     // diffDays (0-6) → array of entries
 
-  /* Shows (active only) + all Live TV entries — only those with a concrete
-     next-air date in the next 7 days. Movies are excluded — the schedule is
-     a TV guide, not a release calendar. Recurring "Tuesdays 9pm"-style
-     entries without a real date are skipped because the user wants the
-     "next new episode" date specifically. */
+  /* Push one entry per episode/game that falls within the next 7 days.
+     label  = episode label ("S16E11 Title") or opponent ("vs Twins")
+     network = per-entry channel override (game-specific TV channel) */
+  function pushEntry(raw, idx, text, date, tab, label, network) {
+    const startOfTarget = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const diff = Math.round((startOfTarget - startOfToday) / 86400000);
+    if (diff < 0 || diff >= 7) return;
+    if (!days[diff]) days[diff] = [];
+    days[diff].push({ raw, idx, text, date, tab, label: label ?? null, network: network ?? null });
+  }
+
   [
     { tab: 'shows',  items: S.shows  },
     { tab: 'livetv', items: S.livetv }
@@ -2836,21 +2842,39 @@ function collectThisWeek() {
       /* Skip ended/cancelled/completed shows */
       if (tab === 'shows' && !isActiveShow(raw)) return;
 
-      const n    = norm(raw);
-      const text = tab === 'livetv'
-        ? pick(n, 'nextgame', 'next_game', 'nextairs', 'nextairing', 'airing')
-        : pick(n, 'nextairs', 'nextairing', 'airing', 'airs', 'whenitairs');
-      if (!text) return;
-
-      const date = parseAiringDate(text);
-      if (!date) return;
-
-      const startOfTarget = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-      const diff = Math.round((startOfTarget - startOfToday) / 86400000);
-      if (diff < 0 || diff >= 7) return;
-
-      if (!days[diff]) days[diff] = [];
-      days[diff].push({ raw, idx, text, date, tab });
+      if (tab === 'shows' && Array.isArray(raw.episodes) && raw.episodes.length) {
+        /* Show every upcoming episode within the next 7 days */
+        raw.episodes.forEach(ep => {
+          if (!ep.air_date) return;
+          const date = parseAiringDate(ep.air_date);
+          if (!date) return;
+          const s = ep.season  ? 'S' + String(ep.season).padStart(2, '0') : '';
+          const e = ep.episode ? 'E' + String(ep.episode).padStart(2, '0') : '';
+          const t = ep.episode_title ? ' ' + ep.episode_title : '';
+          pushEntry(raw, idx, ep.air_date, date, tab, (s + e + t).trim() || null, ep.network || null);
+        });
+      } else if (tab === 'livetv' && Array.isArray(raw.games) && raw.games.length) {
+        /* Show every upcoming game within the next 7 days */
+        raw.games.forEach(game => {
+          if (!game.date) return;
+          const dateStr = game.time ? game.date + ' ' + game.time : game.date;
+          const date = parseAiringDate(dateStr);
+          if (!date) return;
+          pushEntry(raw, idx, dateStr, date, tab,
+            game.opponent ? 'vs ' + game.opponent : null,
+            game.tv_channel || null);
+        });
+      } else {
+        /* Fallback: no attached schedule data — use the single next field */
+        const n = norm(raw);
+        const text = tab === 'livetv'
+          ? pick(n, 'nextgame', 'next_game', 'nextairs', 'nextairing', 'airing')
+          : pick(n, 'nextairs', 'nextairing', 'airing', 'airs', 'whenitairs');
+        if (!text) return;
+        const date = parseAiringDate(text);
+        if (!date) return;
+        pushEntry(raw, idx, text, date, tab, null, null);
+      }
     });
   });
 
@@ -2907,11 +2931,17 @@ function renderScheduleItem(entry) {
   const { raw, idx, text, date, tab } = entry;
   const n       = norm(raw);
   const title   = pick(n, 'title', 'favorite_team_or_channel', 'channel') || 'Untitled';
-  const network = tab === 'shows'
-    ? pick(n, 'streamingon', 'streaming', 'network')
-    : pick(n, 'tvchannel', 'default_channel_or_provider', 'streamingon', 'network');
+  // Use per-entry network (game-specific channel) when available, otherwise fall back to row default
+  const network = entry.network != null
+    ? entry.network
+    : tab === 'shows'
+      ? pick(n, 'streamingon', 'streaming', 'network')
+      : pick(n, 'tvchannel', 'default_channel_or_provider', 'streamingon', 'network');
   const ps      = platformStyle(network);
-  const latest  = tab === 'shows' ? pick(n, 'latestepisode', 'latestep', 'episode', 'latestepisodename') : '';
+  // Use per-entry label (episode info or opponent) when available
+  const latest  = entry.label != null
+    ? entry.label
+    : tab === 'shows' ? pick(n, 'latestepisode', 'latestep', 'episode', 'latestepisodename') : '';
   const league  = tab === 'livetv' ? pick(n, 'league') : '';
   const icon    = tab === 'movies' ? '🎬' : tab === 'shows' ? '📺' : '📡';
 
