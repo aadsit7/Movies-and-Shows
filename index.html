@@ -2056,8 +2056,20 @@ async function searchOnline(query, type) {
                  { retries: 1, timeoutMs: 45000 });
 }
 
+function clientLocalDatetime() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const date = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+  const time = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const off  = -now.getTimezoneOffset();
+  const sign = off >= 0 ? '+' : '-';
+  const tzH  = pad(Math.floor(Math.abs(off) / 60));
+  const tzM  = pad(Math.abs(off) % 60);
+  return `${date}T${time}${sign}${tzH}:${tzM}`;
+}
+
 async function claudeSearch(query, sheet = null) {
-  const body = { action: 'claudeSearch', query };
+  const body = { action: 'claudeSearch', query, clientDatetime: clientLocalDatetime() };
   if (sheet) body.sheetName = sheet;
   const raw = await apiPost(body);
   return parseMediaResult(raw);
@@ -3629,7 +3641,7 @@ async function refreshCard(btn) {
       query = `REFRESH ${title} TV show - latest season, next episode air date, streaming platform 2026`;
     } else if (tab === 'livetv') {
       const league = pick(norm(raw), 'league');
-      query = `Next 5 games for ${title}${league ? ' ' + league : ''} 2026 - return date, time, opponent, TV channel for each game`;
+      query = `Schedule for ${title}${league ? ' ' + league : ''} - if a game is in progress right now include it first, then list next 4 upcoming games. Return exact date (YYYY-MM-DD), start time with timezone, opponent, and TV channel for each.`;
     } else {
       query = `REFRESH ${title} - latest streaming platform, IMDB score, cast 2026`;
     }
@@ -3639,7 +3651,7 @@ async function refreshCard(btn) {
       response = await fetch(APPS_SCRIPT_URL, {
         method:   'POST',
         headers:  { 'Content-Type': 'text/plain;charset=utf-8' },
-        body:     JSON.stringify({ action: 'claudeSearch', query }),
+        body:     JSON.stringify({ action: 'claudeSearch', query, clientDatetime: clientLocalDatetime() }),
         redirect: 'follow',
       });
     } catch (netErr) {
@@ -3915,7 +3927,7 @@ async function doSheetSearch() {
     response = await fetch(APPS_SCRIPT_URL, {
       method:   'POST',
       headers:  { 'Content-Type': 'text/plain;charset=utf-8' },
-      body:     JSON.stringify({ action: 'claudeSearch', query }),
+      body:     JSON.stringify({ action: 'claudeSearch', query, clientDatetime: clientLocalDatetime() }),
       redirect: 'follow',
     });
   } catch (netErr) {
@@ -4145,7 +4157,7 @@ async function doSettingsSearch() {
   resultEl.innerHTML = `<div class="loading-row"><div class="spinner"></div>Claude is looking this up…</div>`;
 
   try {
-    const raw = await apiPost({ action: 'claudeSearch', query });
+    const raw = await apiPost({ action: 'claudeSearch', query, clientDatetime: clientLocalDatetime() });
     if (raw && raw.error) {
       const errMsg = raw.error;
       let displayMsg;
@@ -4237,7 +4249,7 @@ async function updateAll() {
         query = `REFRESH ${title} TV show - latest season, next episode air date, streaming platform 2026`;
       } else if (tab === 'livetv') {
         const league = pick(norm(item), 'league');
-        query = `Next 5 games for ${title}${league ? ' ' + league : ''} 2026 - return date, time, opponent, TV channel for each game`;
+        query = `Schedule for ${title}${league ? ' ' + league : ''} - if a game is in progress right now include it first, then list next 4 upcoming games. Return exact date (YYYY-MM-DD), start time with timezone, opponent, and TV channel for each.`;
       } else {
         query = `REFRESH ${title} - latest streaming platform, IMDB score, cast 2026`;
       }
