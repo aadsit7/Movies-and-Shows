@@ -66,7 +66,7 @@ var LIVE_TV_FIELDS = [
 /* Episode_Schedule: one row per upcoming/recent episode; joined to a show
    by lowercased title. air_date should be ISO YYYY-MM-DD when known. */
 var EPISODE_FIELDS = [
-  'title', 'season', 'episode', 'episode_title', 'air_date', 'network'
+  'title', 'season', 'episode', 'episode_title', 'air_date', 'airstamp', 'network'
 ];
 /* Schedules: one row per game; joined to a live-TV team/channel by
    channel_id (matched against favorite_team_or_channel). date should be
@@ -298,7 +298,7 @@ function normalizeTVMazeShow(show, upcomingEps) {
   var rating    = show.rating && show.rating.average ? String(show.rating.average) : '';
   var premiered = (show.premiered || '').substring(0, 4);
   var episodes  = (upcomingEps || []).map(function(ep) {
-    return { season: ep.season, episode: ep.number, episode_title: ep.name || '', air_date: ep.airdate || '', network: network };
+    return { season: ep.season, episode: ep.number, episode_title: ep.name || '', air_date: ep.airdate || '', airstamp: ep.airstamp || '', network: network };
   });
   return {
     type: 'Show',
