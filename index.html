@@ -1793,10 +1793,14 @@ function buildEntry(raw, tab, idx) {
     : tab === 'livetv'
     ? pick(n, 'nextgame', 'nextairs', 'nextairing', 'airing')
     : '';
+  const statusRaw = pick(n, 'status');
+  const favRaw    = pick(n, 'favorites', 'favorite');
   return {
     raw, tab, idx,
     titleLc:  title.toLowerCase(),
     airsDate: parseAiringDate(airsText),
+    statusLc: statusRaw.trim().toLowerCase(),
+    fav:      /^(yes|true|1|y)$/i.test(favRaw.trim()),
     haystack: [
       title,
       pick(n, 'genre_primary', 'genre'),
@@ -1808,7 +1812,7 @@ function buildEntry(raw, tab, idx) {
       pick(n, 'director'),
       pick(n, 'description', 'desc'),
       pick(n, 'yearstarted', 'year'),
-      pick(n, 'status'),
+      statusRaw,
       pick(n, 'agerating', 'rating'),
       pick(n, 'tone'),
     ].join(' ').toLowerCase(),
@@ -2416,10 +2420,7 @@ function renderLibrary() {
     entries = searchIndex.filter(e => {
       if (e.tab !== 'shows' && e.tab !== 'livetv') return false;
       if (!e.airsDate || e.airsDate.getTime() <= cutoff) return false;
-      if (e.tab === 'shows') {
-        const status = (pick(norm(e.raw), 'status') || '').trim().toLowerCase();
-        if (status !== 'active') return false;
-      }
+      if (e.tab === 'shows' && e.statusLc !== 'active') return false;
       return true;
     });
     // Always sort soonest-first so Today comes before Tomorrow before later
@@ -2431,7 +2432,7 @@ function renderLibrary() {
       return (a.titleLc || '').localeCompare(b.titleLc || '');
     });
   } else if (type === 'favorites') {
-    entries = searchIndex.filter(e => isFavorite(e.raw));
+    entries = searchIndex.filter(e => e.fav);
   } else if (type === 'all') {
     entries = searchIndex.slice();
   } else {
@@ -2445,15 +2446,16 @@ function renderLibrary() {
     if (type !== 'upcoming') {
       // Rank: exact title match first, then all words in title, then others.
       // Skipped for the Upcoming view so date order is preserved during a search.
-      entries.sort((a, b) => {
-        const aExact = a.titleLc === rawQuery.toLowerCase();
-        const bExact = b.titleLc === rawQuery.toLowerCase();
-        if (aExact !== bExact) return aExact ? -1 : 1;
-        const aTitle = words.every(w => a.titleLc.includes(w));
-        const bTitle = words.every(w => b.titleLc.includes(w));
-        if (aTitle !== bTitle) return aTitle ? -1 : 1;
-        return 0;
-      });
+      // Pre-compute rank per entry once so the comparator is O(1) per call.
+      const rawQueryLc = rawQuery.toLowerCase();
+      const ranked = entries.map(e => ({
+        e,
+        r: e.titleLc === rawQueryLc ? 0
+         : words.every(w => e.titleLc.includes(w)) ? 1
+         : 2,
+      }));
+      ranked.sort((a, b) => a.r - b.r);
+      entries = ranked.map(x => x.e);
     }
   } else if (type !== 'upcoming') {
     // No query: shows/livetv with upcoming dates first, sorted by date; movies after
