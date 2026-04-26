@@ -3116,6 +3116,10 @@ async function deleteItem(btn) {
     _indexDirty = true;
     renderLibrary();
     toast(`"${title}" removed`, 'success');
+
+    // Re-sync rowIndices from the sheet so cards below the deleted row
+    // don't point at the wrong row on the next refresh or update.
+    silentReload();
   } catch (err) {
     btn.textContent = '🗑️';
     btn.disabled    = false;
