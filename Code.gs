@@ -75,6 +75,39 @@ var SCHEDULE_FIELDS = [
   'channel_id', 'team', 'league', 'date', 'time', 'opponent', 'tv_channel'
 ];
 
+/* ── Settings sheet ──────────────────────────────────────── */
+/* Reads the Settings tab (if it exists) and returns an object of
+   { setting_name: value } pairs. Falls back to safe defaults when the
+   sheet is absent or a row is missing so the app keeps working even
+   before the Settings tab is created. */
+function getSettings() {
+  var defaults = {
+    search_enabled:    'TRUE',
+    writes_enabled:    'TRUE',
+    sports_enabled:    'TRUE',
+    movies_enabled:    'TRUE',
+    shows_enabled:     'TRUE',
+    default_timezone:  'America/Los_Angeles'
+  };
+  try {
+    var ss    = getSpreadsheet();
+    var sheet = ss.getSheetByName('Settings');
+    if (!sheet) return defaults;
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      var key = String(data[i][0] || '').trim().toLowerCase().replace(/\s+/g, '_');
+      var val = String(data[i][1] || '').trim();
+      if (key) defaults[key] = val;
+    }
+  } catch (_) {}
+  return defaults;
+}
+
+function settingEnabled(settings, key) {
+  var v = String(settings[key] || 'TRUE').toUpperCase();
+  return v !== 'FALSE' && v !== '0' && v !== 'NO';
+}
+
 /* ── Cache ───────────────────────────────────────────────── */
 var CACHE_KEY = 'allMedia_v1';
 var CACHE_TTL = 300; // seconds (5 minutes)
@@ -100,6 +133,9 @@ function doGet(e) {
 
 function doPost(e) {
   try {
+    if (!e || !e.postData || !e.postData.contents) {
+      return respondJson({ error: 'Empty request body' });
+    }
     var body   = JSON.parse(e.postData.contents);
     var action = body.action;
 
@@ -316,6 +352,11 @@ function ensureColumns(sheet, requiredCols) {
 
 /* ── Add row ─────────────────────────────────────────────── */
 function handleAddRow(sheetName, rowData) {
+  var settings = getSettings();
+  if (!settingEnabled(settings, 'writes_enabled')) {
+    return { error: 'Writes are currently disabled. Enable in the Settings sheet (writes_enabled = TRUE).' };
+  }
+
   var ss = getSpreadsheet();
 
   if (isLiveTVSheet(sheetName)) {
@@ -480,12 +521,16 @@ function firstOf(obj, keys) {
 
 /* ── Update row ──────────────────────────────────────────── */
 function handleUpdateRow(sheetName, rowIndex, rowData) {
+  var rowNum = parseInt(rowIndex, 10);
+  if (isNaN(rowNum) || rowNum < 2) return { error: 'Invalid rowIndex: ' + rowIndex };
+
   var ss    = getSpreadsheet();
   var sheet = isLiveTVSheet(sheetName)
     ? ss.getSheetByName(LIVE_TV_SHEET)
     : ss.getSheetByName(CONTENT_MASTER);
 
   if (!sheet) return { error: 'Sheet not found for: ' + sheetName };
+  if (rowNum > sheet.getLastRow()) return { error: 'Row out of range: ' + rowIndex };
 
   /* Ensure all expected columns exist so next_airs / next_game are never
      silently dropped when the sheet is missing those headers. */
@@ -493,7 +538,7 @@ function handleUpdateRow(sheetName, rowIndex, rowData) {
 
   var lastCol  = sheet.getLastColumn();
   var headers  = normalizeHeaders(sheet.getRange(1, 1, 1, lastCol).getValues()[0]);
-  var existing = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+  var existing = sheet.getRange(rowNum, 1, 1, lastCol).getValues()[0];
 
   /* Normalize Claude-style keys (streamingOn → streaming_on, etc.)
      so a refresh always persists the freshest values from Claude. */
@@ -513,7 +558,7 @@ function handleUpdateRow(sheetName, rowIndex, rowData) {
     return existing[i] !== undefined ? existing[i] : '';
   });
 
-  sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+  sheet.getRange(rowNum, 1, 1, row.length).setValues([row]);
   invalidateCache();
   return { success: true };
 }
@@ -597,6 +642,11 @@ function writeScheduleRows(sheetName, fields, joinKey, joinValue, rows) {
 
 /* ── Claude search (with web_search tool) ────────────────── */
 function handleClaudeSearch(query, sheetName) {
+  var settings = getSettings();
+  if (!settingEnabled(settings, 'search_enabled')) {
+    return { error: 'Search is currently disabled. Enable it in the Settings sheet (search_enabled = TRUE).' };
+  }
+
   var apiKey = getAnthropicKey();
   if (!apiKey) {
     return { error: 'Missing ANTHROPIC_API_KEY — set it in Apps Script → Project Settings → Script Properties' };
@@ -629,24 +679,36 @@ function handleClaudeSearch(query, sheetName) {
     messages: [{ role: 'user', content: prompt }]
   };
 
-  var response;
-  try {
-    response = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
-      method:      'post',
-      contentType: 'application/json',
-      headers: {
-        'x-api-key':         apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      payload:            JSON.stringify(payload),
-      muteHttpExceptions: true
-    });
-  } catch (netErr) {
-    return { error: 'Network error contacting Anthropic: ' + netErr.message };
+  /* Call Anthropic with one automatic retry on transient 5xx / network errors. */
+  var response, code, body;
+  var fetchOptions = {
+    method:      'post',
+    contentType: 'application/json',
+    headers: {
+      'x-api-key':         apiKey,
+      'anthropic-version': '2023-06-01'
+    },
+    payload:            JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  for (var attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) Utilities.sleep(2000);
+    try {
+      response = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', fetchOptions);
+    } catch (netErr) {
+      if (attempt === 0) continue;
+      return { error: 'Network error contacting Anthropic: ' + netErr.message };
+    }
+    code = response.getResponseCode();
+    body = response.getContentText();
+    /* Retry on 5xx server errors or 529 (overloaded) only */
+    if (code >= 500 || code === 529) {
+      if (attempt === 0) continue;
+    }
+    break;
   }
 
-  var code = response.getResponseCode();
-  var body = response.getContentText();
   if (code < 200 || code >= 300) {
     var apiErr;
     try { apiErr = JSON.parse(body); } catch (_) {}
@@ -714,15 +776,35 @@ function extractTextFromContent(content) {
   return out;
 }
 
-/* Extract the outermost JSON object from a possibly-fenced text blob. */
+/* Extract the outermost JSON object from a possibly-fenced text blob.
+   Uses balanced-bracket counting so trailing text after the closing }
+   (e.g. a model explanation) does not corrupt the extracted substring. */
 function parseJsonFromText(text) {
   if (!text) return null;
   var stripped = String(text).replace(/```json\s*/gi, '').replace(/```/g, '').trim();
+
+  /* Fast path: the whole string is already valid JSON */
+  try { var direct = JSON.parse(stripped); if (direct && typeof direct === 'object') return direct; } catch (_) {}
+
+  /* Balanced-bracket scan to find the first complete {...} object */
   var start = stripped.indexOf('{');
-  var end   = stripped.lastIndexOf('}');
-  if (start === -1 || end <= start) return null;
-  try { return JSON.parse(stripped.substring(start, end + 1)); }
-  catch (_) { return null; }
+  if (start === -1) return null;
+  var depth = 0, inStr = false, esc = false;
+  for (var i = start; i < stripped.length; i++) {
+    var c = stripped[i];
+    if (esc)            { esc = false; continue; }
+    if (c === '\\' && inStr) { esc = true;  continue; }
+    if (c === '"')      { inStr = !inStr; continue; }
+    if (inStr)          { continue; }
+    if (c === '{')      { depth++; }
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) {
+        try { return JSON.parse(stripped.substring(start, i + 1)); } catch (_) { return null; }
+      }
+    }
+  }
+  return null;
 }
 
 function inferContentKind(sheetName) {
