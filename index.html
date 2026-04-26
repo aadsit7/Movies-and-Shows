@@ -2945,13 +2945,26 @@ function renderScheduleItem(entry) {
   const league  = tab === 'livetv' ? pick(n, 'league') : '';
   const icon    = tab === 'movies' ? '🎬' : tab === 'shows' ? '📺' : '📡';
 
-  let timeStr = '';
+  // Derive "when" and time from the parsed date object (local time) so we never
+  // show stale relative labels ("Tonight" for a tomorrow slot) or ugly raw ISO blobs.
+  const SDAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const SMONS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  let whenStr, timeStr = '';
   if (date) {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfDate  = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const diff = Math.round((startOfDate - startOfToday) / 86400000);
+    whenStr = diff === 0 ? 'Today'
+      : diff === 1 ? 'Tomorrow'
+      : `${SDAYS[date.getDay()]} ${SMONS[date.getMonth()]} ${date.getDate()}`;
     const h = date.getHours(), m = date.getMinutes();
     if (h > 0 || m > 0) {
       const ampm = h >= 12 ? 'pm' : 'am';
       timeStr = `${h % 12 || 12}${m > 0 ? ':' + String(m).padStart(2, '0') : ''}${ampm}`;
     }
+  } else {
+    whenStr = friendlyDate(text);
   }
 
   return `
@@ -2961,7 +2974,7 @@ function renderScheduleItem(entry) {
         <div class="schedule-item-info">
           <div class="schedule-item-title">${esc(title)}</div>
           ${latest ? `<div class="schedule-item-ep">${esc(latest)}</div>` : ''}
-          <div class="schedule-item-when">${esc(friendlyDate(text))}</div>
+          <div class="schedule-item-when">${esc(whenStr)}</div>
         </div>
         ${timeStr ? `<div class="schedule-item-time">${esc(timeStr)}</div>` : ''}
       </div>
