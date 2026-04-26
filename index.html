@@ -1969,11 +1969,14 @@ function loadAllData() {
         <div class="skel skel-desc"></div>
       </div>`).join('');
   }
-  return fetch(APPS_SCRIPT_URL + '?action=getAllMedia', { redirect: 'follow' })
-    .then(r => r.text())
+  return fetch(APPS_SCRIPT_URL + '?action=getAllMedia&forceRefresh=true', { redirect: 'follow' })
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    })
     .then(text => {
       const data = JSON.parse(text);
-      console.log('Full response:', JSON.stringify(data).slice(0,1000));
+      if (data.error) throw new Error(data.error);
       S.movies = data.movies || [];
       S.shows  = data.shows  || [];
       S.livetv = data.liveTV || [];
@@ -1987,11 +1990,13 @@ function loadAllData() {
     .catch(err => {
       console.error('loadAllData:', err);
       S.connStatus = 'err';
+      const detail = err.message ? `<p style="font-size:12px;color:var(--text-2);margin-top:6px;word-break:break-word">${esc(err.message)}</p>` : '';
       const errHtml = `
         <div class="error-state">
           <div class="big-icon">⚠️</div>
-          <h3>Couldn't connect to Google Sheets</h3>
-          <p>Make sure the Apps Script is deployed and the sheet URL is correct.</p>
+          <h3>Couldn't load from Google Sheets</h3>
+          <p>Check that the Apps Script is deployed and the spreadsheet exists.</p>
+          ${detail}
           <button class="btn btn-secondary btn-sm" style="margin-top:14px"
             onclick="loadAllData()">Try Again</button>
         </div>`;
@@ -2042,6 +2047,7 @@ async function loadTabData(tab) {
   }
   try {
     const data   = await getAllMedia();
+    if (data.error) throw new Error(data.error);
     S.movies     = data.Movies  || data.movies  || [];
     S.shows      = data.Shows   || data.shows   || [];
     S.livetv     = data.liveTV || [];
@@ -3264,7 +3270,18 @@ async function doSheetSearch() {
 
   if (result && result.error) {
     if (btn) { btn.disabled = false; btn.textContent = 'Search'; }
-    resultEl.innerHTML = `<p class="sheet-error">Search failed — ${esc(result.error)}</p>`;
+    const errMsg = result.error;
+    let displayMsg;
+    if (errMsg.toLowerCase().includes('usage limits') || errMsg.toLowerCase().includes('rate limit') || errMsg.toLowerCase().includes('quota')) {
+      const dateMatch = errMsg.match(/(\d{4}-\d{2}-\d{2})/);
+      const until = dateMatch ? ` Try again after ${dateMatch[1]}.` : '';
+      displayMsg = `Search is temporarily unavailable — AI API usage limit reached.${until}`;
+    } else if (errMsg.toLowerCase().includes('missing anthropic_api_key') || errMsg.toLowerCase().includes('api key')) {
+      displayMsg = `Search unavailable — API key not configured in Apps Script settings.`;
+    } else {
+      displayMsg = `Search failed — ${esc(errMsg)}`;
+    }
+    resultEl.innerHTML = `<p class="sheet-error">${displayMsg}</p>`;
     return;
   }
 
@@ -3455,7 +3472,23 @@ async function doSettingsSearch() {
   resultEl.innerHTML = `<div class="loading-row"><div class="spinner"></div>Claude is looking this up…</div>`;
 
   try {
-    const parsed = await claudeSearch(query);
+    const raw = await apiPost({ action: 'claudeSearch', query });
+    if (raw && raw.error) {
+      const errMsg = raw.error;
+      let displayMsg;
+      if (errMsg.toLowerCase().includes('usage limits') || errMsg.toLowerCase().includes('rate limit') || errMsg.toLowerCase().includes('quota')) {
+        const dateMatch = errMsg.match(/(\d{4}-\d{2}-\d{2})/);
+        const until = dateMatch ? ` Try again after ${dateMatch[1]}.` : '';
+        displayMsg = `Search is temporarily unavailable — AI API usage limit reached.${until}`;
+      } else if (errMsg.toLowerCase().includes('api key')) {
+        displayMsg = `Search unavailable — API key not configured in Apps Script settings.`;
+      } else {
+        displayMsg = `Search failed — ${esc(errMsg)}`;
+      }
+      resultEl.innerHTML = `<p style="color:var(--error);font-size:13px;padding:16px 0">${displayMsg}</p>`;
+      return;
+    }
+    const parsed = parseMediaResult(raw);
     if (!parsed || !pick(norm(parsed), 'title', 'channel', 'favorite_team_or_channel')) {
       resultEl.innerHTML = `<p class="text-muted text-sm" style="padding:16px 0">
         Couldn't find info for &ldquo;${esc(query)}&rdquo; — try a more specific title.</p>`;
@@ -3466,7 +3499,7 @@ async function doSettingsSearch() {
   } catch (err) {
     console.error('doSettingsSearch:', err);
     resultEl.innerHTML = `<p style="color:var(--error);font-size:13px;padding:16px 0">
-      Search failed — please try again.</p>`;
+      Search failed — ${esc(err.message || 'please try again')}.</p>`;
   }
 }
 
@@ -3590,6 +3623,7 @@ const refreshAll = updateAll;
 async function silentReload() {
   try {
     const data   = await getAllMedia();
+    if (data.error) throw new Error(data.error);
     S.movies     = data.movies || data.Movies || [];
     S.shows      = data.shows  || data.Shows  || [];
     S.livetv     = data.liveTV || [];
