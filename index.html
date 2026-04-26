@@ -29,6 +29,7 @@
       --warn:        #facc15;
       --nav-h:       72px;
       --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-top:    env(safe-area-inset-top, 0px);
     }
 
     /* ── Base ─────────────────────────────────────────────── */
@@ -53,12 +54,57 @@
       overflow: hidden;
     }
 
+    /* ── Top header (clean dark, app title centered) ───────── */
+    #app-header {
+      flex-shrink: 0;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 52px;
+      min-height: 52px;
+      padding: 0 16px;
+      padding-top: var(--safe-top);
+      box-sizing: content-box;
+      background: #0d0d1a;
+      border-bottom: 1px solid var(--border);
+    }
+    .app-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: #ffffff;
+      letter-spacing: .2px;
+      text-align: center;
+      margin: 0;
+    }
+    .header-refresh {
+      position: absolute;
+      right: 4px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 44px;
+      height: 44px;
+      background: none;
+      border: none;
+      color: #00BFFF;
+      font-size: 22px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .header-refresh:active { opacity: .6; }
+    .header-refresh.spinning { animation: spin .8s linear infinite; }
+
     /* sticky sub-header (search bar) per tab */
     #sub-header {
       flex-shrink: 0;
       background: #0d0d1a;
       border-bottom: 1px solid var(--border);
-      padding: 10px 14px;
+      padding: 10px 16px;
     }
 
     /* scrollable content area */
@@ -67,7 +113,7 @@
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
       overscroll-behavior-y: contain;
-      padding: 12px 14px;
+      padding: 12px 16px;
       /* leave room for nav bar + safe area */
       padding-bottom: calc(var(--nav-h) + var(--safe-bottom) + 80px);
     }
@@ -76,6 +122,7 @@
     #bottom-nav {
       flex-shrink: 0;
       display: flex;
+      min-height: var(--nav-h);
       height: calc(var(--nav-h) + var(--safe-bottom));
       padding-bottom: var(--safe-bottom);
       background: #0d0d1a;
@@ -89,7 +136,7 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 3px;
+      gap: 4px;
       background: none;
       border: none;
       color: #555;
@@ -97,12 +144,13 @@
       font-weight: 600;
       letter-spacing: .3px;
       cursor: pointer;
-      transition: color .15s;
-      padding: 10px 4px 8px;
-      min-height: 48px;
+      padding: 10px 4px 10px;
+      min-height: 44px;
+      -webkit-tap-highlight-color: transparent;
     }
     .nav-btn .nav-icon { font-size: 24px; line-height: 1; }
     .nav-btn.active    { color: #00BFFF; }
+    .nav-btn:active    { opacity: .7; }
 
     /* ── Type filter chips ────────────────────────────────── */
     .type-chips {
@@ -193,11 +241,11 @@
       width: 100%;
       height: 48px;
       background: #1a1a2e;
-      border: 1px solid var(--border);
+      border: 1px solid #333;
       border-radius: 12px;
-      padding: 0 14px 0 38px;
+      padding: 0 16px 0 38px;
       color: var(--text);
-      font-size: 16px;
+      font-size: 16px; /* critical: prevents iOS auto-zoom */
       outline: none;
       appearance: none;
       -webkit-appearance: none;
@@ -206,6 +254,8 @@
     input[type="text"].filter-input:focus {
       border-color: var(--accent);
     }
+    /* Settings tab uses a slightly taller search input per spec */
+    #settings-search-input { height: 52px; }
     input::placeholder { color: var(--text-3); }
 
     /* ── Tab content panels ───────────────────────────────── */
@@ -584,10 +634,11 @@
     /* ── Media card ───────────────────────────────────────── */
     .media-card {
       background: #1a1a2e;
-      border: 1px solid var(--border);
+      border: 1px solid transparent;
       border-left: 4px solid #00BFFF;
       border-radius: 16px;
       padding: 16px;
+      padding-bottom: 60px;
       position: relative;
       animation: fadeUp .3s ease both;
       overflow: hidden;
@@ -602,24 +653,29 @@
       font-weight: 700;
       color: #ffffff;
       line-height: 1.25;
-      padding-right: 112px; /* avoid overlap with refresh + delete btns */
-      margin-bottom: 4px;
+      padding-right: 56px; /* avoid overlap with delete btn (top-right) */
+      margin-bottom: 6px;
     }
     .card-meta {
       display: flex;
-      flex-wrap: wrap;
-      gap: 5px;
+      flex-wrap: nowrap;
+      gap: 6px;
       align-items: center;
       margin-bottom: 8px;
-    }
-    .meta-year   { color: #8888aa; font-size: 13px; }
-    .meta-dot    { color: var(--text-3); font-size: 13px; }
-    .meta-genre  {
-      background: #252540;
       color: #8888aa;
-      border-radius: 5px;
-      padding: 1px 7px;
       font-size: 13px;
+      line-height: 1.3;
+      overflow: hidden;
+    }
+    .meta-year   { color: #8888aa; font-size: 13px; white-space: nowrap; }
+    .meta-dot    { color: #8888aa; font-size: 13px; }
+    .meta-genre  {
+      background: transparent;
+      color: #8888aa;
+      border-radius: 0;
+      padding: 0;
+      font-size: 13px;
+      white-space: nowrap;
     }
 
     /* badges row */
@@ -694,8 +750,8 @@
 
     /* description */
     .card-desc {
-      font-size: 13px;
-      color: #999;
+      font-size: 14px;
+      color: #aaaaaa;
       line-height: 1.5;
       margin-top: 8px;
       display: -webkit-box;
@@ -709,28 +765,28 @@
       -webkit-line-clamp: unset;
     }
 
-    /* refresh button */
+    /* refresh button — bottom right per spec */
     .refresh-btn {
       position: absolute;
-      top: 8px;
+      bottom: 8px;
       right: 8px;
-      width: 48px;
-      height: 48px;
-      background: #252540;
-      border: 1px solid var(--border);
+      width: 44px;
+      height: 44px;
+      background: transparent;
+      border: none;
       border-radius: 50%;
-      color: var(--text-2);
-      font-size: 16px;
+      color: #00BFFF;
+      font-size: 20px;
       display: flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      transition: background .15s, color .15s;
       z-index: 2;
       padding: 0;
       line-height: 1;
+      -webkit-tap-highlight-color: transparent;
     }
-    .refresh-btn:active { background: #333; color: var(--text); }
+    .refresh-btn:active   { opacity: .55; }
     .refresh-btn.spinning { animation: spin .7s linear infinite; }
     @keyframes spin {
       from { transform: rotate(0deg); }
@@ -740,11 +796,11 @@
     .delete-btn {
       position: absolute;
       top: 8px;
-      right: 64px;
-      width: 48px;
-      height: 48px;
-      background: #252540;
-      border: 1px solid var(--border);
+      right: 8px;
+      width: 44px;
+      height: 44px;
+      background: transparent;
+      border: none;
       border-radius: 50%;
       color: #ff6b6b;
       font-size: 16px;
@@ -752,12 +808,13 @@
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      transition: background .15s, color .15s;
       z-index: 2;
       padding: 0;
       line-height: 1;
+      opacity: .8;
+      -webkit-tap-highlight-color: transparent;
     }
-    .delete-btn:active { background: #3a1a1a; color: #ff4444; }
+    .delete-btn:active { opacity: .5; }
 
     /* updating overlay */
     .update-overlay {
@@ -776,13 +833,14 @@
 
     /* ── Skeleton ─────────────────────────────────────────── */
     .skeleton-card {
-      background: var(--card);
-      border: 1px solid var(--border);
+      background: #1a1a2e;
+      border: 1px solid transparent;
+      border-left: 4px solid #00BFFF;
       border-radius: 16px;
-      padding: 14px;
+      padding: 16px;
     }
     .skel {
-      background: linear-gradient(90deg, #1e1e1e 25%, #272727 50%, #1e1e1e 75%);
+      background: linear-gradient(90deg, #1a1a2e 25%, #252535 50%, #1a1a2e 75%);
       background-size: 200% 100%;
       animation: shimmer 1.4s ease infinite;
       border-radius: 6px;
@@ -856,14 +914,15 @@
     /* ── FAB ──────────────────────────────────────────────── */
     #fab {
       position: fixed;
-      right: 18px;
-      bottom: calc(var(--nav-h) + var(--safe-bottom) + 14px);
+      right: 20px;
+      bottom: calc(var(--nav-h) + var(--safe-bottom) + 20px);
       width: 56px;
       height: 56px;
       border-radius: 50%;
       background: #00BFFF;
-      color: #fff;
-      font-size: 28px;
+      color: #000;
+      font-size: 30px;
+      font-weight: 600;
       line-height: 1;
       border: none;
       cursor: pointer;
@@ -873,6 +932,7 @@
       justify-content: center;
       z-index: 150;
       transition: transform .15s, box-shadow .15s;
+      -webkit-tap-highlight-color: transparent;
     }
     #fab:active { transform: scale(.94); box-shadow: 0 2px 10px rgba(0,191,255,.3); }
     #fab.hidden { display: none; }
@@ -893,27 +953,27 @@
       position: fixed;
       inset-inline: 0;
       bottom: 0;
-      background: #161616;
+      background: #1a1a2e;
       border-radius: 22px 22px 0 0;
       z-index: 301;
       transform: translateY(100%);
       transition: transform .35s cubic-bezier(.32,.72,0,1);
-      max-height: 92dvh;
-      max-height: 92vh;
+      max-height: 85dvh;
+      max-height: 85vh;
       display: flex;
       flex-direction: column;
     }
     .bottom-sheet.open { transform: translateY(0); }
 
     .sheet-handle {
-      width: 36px; height: 4px;
-      background: #333;
+      width: 40px; height: 4px;
+      background: #555;
       border-radius: 2px;
-      margin: 14px auto 0;
+      margin: 10px auto 4px;
       flex-shrink: 0;
     }
     .sheet-header {
-      padding: 12px 18px 0;
+      padding: 8px 16px 0;
       flex-shrink: 0;
       display: flex;
       align-items: center;
@@ -922,21 +982,22 @@
     }
     .sheet-title { font-size: 19px; font-weight: 700; flex: 1; min-width: 0; }
     .sheet-close {
-      width: 36px; height: 36px;
+      width: 44px; height: 44px;
       flex-shrink: 0;
-      background: #252540;
-      border: 1px solid var(--border);
+      background: transparent;
+      border: none;
       border-radius: 50%;
       color: var(--text-2);
-      font-size: 18px;
+      font-size: 24px;
       line-height: 1;
       display: flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
       padding: 0;
+      -webkit-tap-highlight-color: transparent;
     }
-    .sheet-close:active { background: #333; color: var(--text); }
+    .sheet-close:active { opacity: .55; color: var(--text); }
 
     /* Prominent airing / next-game block */
     .airing-block {
@@ -954,7 +1015,7 @@
       color: var(--accent);
       margin-bottom: 3px;
     }
-    .airing-value { font-size: 14px; color: #fff; font-weight: 500; }
+    .airing-value { font-size: 15px; color: #00BFFF; font-weight: 600; }
     .airing-empty { font-size: 12px; color: var(--text-2); font-style: italic; }
 
     .media-card { cursor: pointer; }
@@ -1035,19 +1096,21 @@
       line-height: 1.45;
     }
 
-    /* ── Preview card ─────────────────────────────────────── */
+    /* ── Preview card (matches main card style) ───────────── */
     .preview-card {
-      background: #1e1e1e;
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 14px;
+      background: #1a1a2e;
+      border: 1px solid transparent;
+      border-left: 4px solid #00BFFF;
+      border-radius: 16px;
+      padding: 16px;
       margin-top: 4px;
     }
     .preview-title {
       font-size: 18px;
       font-weight: 700;
-      margin-bottom: 4px;
-      line-height: 1.2;
+      color: #ffffff;
+      margin-bottom: 6px;
+      line-height: 1.25;
     }
     .type-badge {
       display: inline-block;
@@ -1133,15 +1196,18 @@
     .toast {
       background: #2a2a2a;
       color: var(--text);
-      padding: 10px 18px;
+      padding: 12px 22px;
       border-radius: 22px;
-      font-size: 13px;
+      font-size: 16px;
       font-weight: 500;
       white-space: nowrap;
       opacity: 0;
       transform: translateY(6px);
       transition: opacity .2s, transform .2s;
       box-shadow: 0 4px 18px rgba(0,0,0,.5);
+      max-width: calc(100vw - 32px);
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .toast.show { opacity: 1; transform: translateY(0); }
     .toast.toast-success { background: #0d2e1a; color: #4ade80; }
@@ -1159,6 +1225,12 @@
      APP SHELL
 ════════════════════════════════════════════════════════════ -->
 <div id="app">
+
+  <!-- Top header: app title centered + cyan refresh icon -->
+  <header id="app-header">
+    <h1 class="app-title">Family Media Tracker</h1>
+    <button class="header-refresh" onclick="loadAllData()" aria-label="Refresh" title="Refresh">↻</button>
+  </header>
 
   <!-- Sub-header: search bar / settings title -->
   <div id="sub-header"></div>
@@ -1183,15 +1255,21 @@
     </div>
   </div>
 
-  <!-- Bottom navigation (3 tabs) -->
+  <!-- Bottom navigation (4 tabs) -->
   <nav id="bottom-nav">
-    <button class="nav-btn active"  id="nav-schedule" onclick="switchTab('schedule')">
-      <span class="nav-icon">📅</span>Schedule
+    <button class="nav-btn" id="nav-tab-movies"
+      onclick="switchTab('shows');setLibraryType('movies');document.querySelectorAll('#bottom-nav .nav-btn').forEach(b=>b.classList.remove('active'));this.classList.add('active')">
+      <span class="nav-icon">🎬</span>Movies
     </button>
-    <button class="nav-btn"        id="nav-shows"   onclick="switchTab('shows')">
-      <span class="nav-icon">🎬</span>Library
+    <button class="nav-btn" id="nav-shows"
+      onclick="switchTab('shows');setLibraryType('shows');document.querySelectorAll('#bottom-nav .nav-btn').forEach(b=>b.classList.remove('active'));this.classList.add('active')">
+      <span class="nav-icon">📺</span>Shows
     </button>
-    <button class="nav-btn"        id="nav-settings" onclick="switchTab('settings')">
+    <button class="nav-btn" id="nav-tab-livetv"
+      onclick="switchTab('shows');setLibraryType('livetv');document.querySelectorAll('#bottom-nav .nav-btn').forEach(b=>b.classList.remove('active'));this.classList.add('active')">
+      <span class="nav-icon">📡</span>Live TV
+    </button>
+    <button class="nav-btn" id="nav-settings" onclick="switchTab('settings')">
       <span class="nav-icon">⚙️</span>Settings
     </button>
   </nav>
