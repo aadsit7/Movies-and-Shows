@@ -1936,23 +1936,18 @@ function relativeWhen(date) {
 /* Parse a date value (ISO string or date-only string) and return a TV-guide
    style label: "Tonight · 7:30pm", "Tomorrow · 4:05pm", "Sun · 1pm",
    "Sun Apr 27 · 4:05pm", or the original string if it cannot be parsed. */
-function friendlyDate(value) {
-  if (!value) return value;
-  const s = String(value).trim();
-  const d = new Date(s);
-  if (isNaN(d.getTime())) return s; // unparseable — show as-is
-
+/* Format a pre-parsed Date object as a human-friendly schedule label. */
+function friendlyDateObj(d) {
+  if (!d || isNaN(d.getTime())) return '';
   const now = new Date();
   const startOfToday  = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const startOfTarget = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const diffDays = Math.round((startOfTarget - startOfToday) / 86400000);
-
   const h = d.getHours(), m = d.getMinutes();
   const hasTime = h > 0 || m > 0;
   const timeStr = hasTime
     ? `${h % 12 || 12}${m > 0 ? ':' + String(m).padStart(2,'0') : ''}${h >= 12 ? 'pm' : 'am'}`
     : '';
-
   let dayStr;
   if      (diffDays === 0) dayStr = (hasTime && h >= 17) ? 'Tonight' : 'Today';
   else if (diffDays === 1) dayStr = 'Tomorrow';
@@ -1960,8 +1955,17 @@ function friendlyDate(value) {
     dayStr = d.toLocaleDateString([], { weekday: 'short' });
   else
     dayStr = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
-
   return timeStr ? `${dayStr} · ${timeStr}` : dayStr;
+}
+
+function friendlyDate(value) {
+  if (!value) return value;
+  const s = String(value).trim();
+  /* Use parseAiringDate first so ISO date strings like "2026-04-26T00:00:00.000Z"
+     are interpreted in local time rather than UTC (avoids off-by-one-day display). */
+  const d = parseAiringDate(s) || new Date(s);
+  if (isNaN(d.getTime())) return s;
+  return friendlyDateObj(d) || s;
 }
 
 /* For recurring shows like "Tuesdays at 9pm", extract a day-of-week label. */
@@ -3583,9 +3587,12 @@ function openDetailSheet(tab, idx) {
             const s  = pick(en, 'season');
             const e  = pick(en, 'episode');
             const t  = pick(en, 'episode_title', 'title');
-            const d  = pick(en, 'air_date', 'date');
+            const d     = pick(en, 'air_date', 'date');
+            const stamp = pick(en, 'airstamp');
+            const epDate = stamp ? new Date(stamp) : parseAiringDate(d);
             const code = (s ? 'S' + String(s).padStart(2,'0') : '') + (e ? 'E' + String(e).padStart(2,'0') : '');
-            return `<div class="ep-value" style="margin-top:4px">${esc(code)}${code && t ? ' · ' : ''}${esc(t)}${d ? ' — ' + esc(friendlyDate(d)) : ''}</div>`;
+            const dateLabel = (epDate && !isNaN(epDate.getTime())) ? friendlyDateObj(epDate) : (d ? friendlyDate(d) : '');
+            return `<div class="ep-value" style="margin-top:4px">${esc(code)}${code && t ? ' · ' : ''}${esc(t)}${dateLabel ? ' — ' + esc(dateLabel) : ''}</div>`;
           }).join('')}
         </div>`;
     }
