@@ -377,6 +377,7 @@ function doPost(e) {
     if (action === 'updateRow')         return respondJson(handleUpdateRow(body.sheetName, body.rowIndex, body.rowData));
     if (action === 'deleteRow')         return respondJson(handleDeleteRow(body.sheetName, body.rowIndex));
     if (action === 'claudeSearch')      return respondJson(handleClaudeSearch(body.query, body.sheetName));
+    if (action === 'recommendForMe')    return respondJson(handleRecommendForMe());
     if (action === 'removeDuplicates')  return respondJson(removeDuplicatesFromSheet(body.sheetName));
     if (action === 'saveEpisodes')      return respondJson(handleSaveEpisodes(body.title, body.episodes));
     if (action === 'saveGames')         return respondJson(handleSaveGames(body.channelId, body.games));
@@ -1019,6 +1020,236 @@ function handleClaudeSearch(query, sheetName) {
   } catch (scheduleErr) { /* surface nothing; schedules are best-effort */ }
 
   return { success: true, data: mediaData };
+}
+
+/* ── Personalized recommendations ─────────────────────────────
+   Reads the user's saved Movies + Shows, asks Claude to follow the
+   four-phase recommendation framework (build a taste profile, search the
+   web in three parallel passes, score, and return 2 movies + 2 shows),
+   then returns the parsed result for the front-end to render.
+
+   Response shape:
+     { profile: "<2-3 sentence taste fingerprint>",
+       results: [
+         { type, title, year, genre, description, streamingOn, imdbScore,
+           tone, network?, status?, seasons?, nextAirs?,
+           whyItFits, confidence },
+         ...4 total
+       ],
+       note?: "<optional explanation, e.g. library too small>" }
+*/
+function handleRecommendForMe() {
+  var settings = getSettings();
+  if (!settingEnabled(settings, 'search_enabled')) {
+    return { error: 'Search is currently disabled. Enable it in the Settings sheet (search_enabled = TRUE).' };
+  }
+
+  var apiKey = getAnthropicKey();
+  if (!apiKey) {
+    return { error: 'Missing ANTHROPIC_API_KEY — set it in Apps Script → Project Settings → Script Properties' };
+  }
+
+  /* Read library digest. We use the unified read so we get the same
+     dedupe + projection treatment the front-end sees. */
+  var media = readAllMedia();
+  var movies = (media && media.movies) || [];
+  var shows  = (media && media.shows)  || [];
+
+  if (movies.length + shows.length < 3) {
+    return {
+      profile: '',
+      results: [],
+      note: 'Add at least a few movies or shows to your library so we can build a taste profile.'
+    };
+  }
+
+  /* Compact each library entry to the fields most useful for taste
+     analysis. Keeps the prompt small enough to fit comfortably. */
+  function digest(item) {
+    var n = {};
+    Object.keys(item || {}).forEach(function(k) { n[k.toLowerCase().replace(/[_\s]/g, '')] = item[k]; });
+    function p() { for (var i = 0; i < arguments.length; i++) { var v = n[arguments[i].toLowerCase().replace(/[_\s]/g, '')]; if (v != null && v !== '') return String(v); } return ''; }
+    var parts = [];
+    var title = p('title');
+    if (!title) return '';
+    parts.push(title);
+    var year  = p('yearstarted', 'year');
+    if (year)  parts.push('(' + year + ')');
+    var genre = p('genreprimary', 'genre');
+    if (genre) parts.push('— ' + genre);
+    var tone  = p('tone');
+    if (tone)  parts.push('[tone: ' + tone + ']');
+    var rating = p('agerating', 'rating');
+    if (rating) parts.push('[' + rating + ']');
+    return parts.join(' ');
+  }
+
+  var movieList = movies.map(digest).filter(Boolean).slice(0, 80);
+  var showList  = shows.map(digest).filter(Boolean).slice(0, 80);
+
+  /* Excluded titles — never recommend something the user already has. */
+  var excludedTitles = []
+    .concat(movies.map(function(m) { return String(m.title || '').toLowerCase().trim(); }))
+    .concat(shows.map(function(s)  { return String(s.title || '').toLowerCase().trim(); }))
+    .filter(Boolean);
+
+  var today = new Date();
+  var todayStr = today.getFullYear() + '-' +
+    String(today.getMonth() + 1).padStart(2, '0') + '-' +
+    String(today.getDate()).padStart(2, '0');
+
+  var prompt =
+    'You are a personalized entertainment recommendation agent. Today\'s date is ' + todayStr + '.\n\n' +
+    'The user\'s library is below — these are titles they have already watched and enjoyed. ' +
+    'Do NOT recommend anything from this list.\n\n' +
+    'MOVIES THE USER HAS SAVED (' + movieList.length + '):\n' +
+    (movieList.length ? '- ' + movieList.join('\n- ') : '(none)') + '\n\n' +
+    'TV SHOWS THE USER HAS SAVED (' + showList.length + '):\n' +
+    (showList.length ? '- ' + showList.join('\n- ') : '(none)') + '\n\n' +
+    'Follow this four-phase framework strictly:\n\n' +
+    'PHASE 1 — BUILD THE TASTE PROFILE BEFORE SEARCHING\n' +
+    'Synthesize the list above (do not search yet):\n' +
+    '  1. GENRES: which genres dominate?\n' +
+    '  2. TONES: which tones recur (slow-burn, satirical, emotionally heavy, witty, etc.)?\n' +
+    '  3. THEMES: which subject matter repeats (moral ambiguity, class tension, found family, unreliable narrator, crime procedural, etc.)?\n' +
+    '  4. ERA / FORMAT: prestige TV, indie film, blockbusters, foreign language, classics?\n' +
+    '  5. AVOID SIGNALS: which genres/tones are completely absent? Treat these as soft avoids.\n' +
+    '  6. TASTE FINGERPRINT: write a 2-3 sentence summary you will score every candidate against.\n\n' +
+    'PHASE 2 — RUN THREE PARALLEL SEARCH PASSES (use the web_search tool, free public sources only)\n' +
+    '  PASS A — Streaming catalog: target JustWatch, Letterboxd, IMDb lists, Rotten Tomatoes. ' +
+    'Query like "[theme/genre from fingerprint] best movies/shows ' + today.getFullYear() + '" and ' +
+    '"hidden gem [genre] streaming". Goal: 10–15 candidates currently streamable.\n' +
+    '  PASS B — Social discovery: target Reddit (r/moviesuggestions, r/ifyoulikeblank, r/television), ' +
+    'Letterboxd lists, fan wikis. Query like "if you liked [top 2-3 titles from their list] recommendations" ' +
+    'and "fans of [title] also loved". Goal: 5–10 community-endorsed thematic adjacents.\n' +
+    '  PASS C — Live & broadcast: target TV Guide, Reelgood, network sites (NBC, HBO, PBS), sports schedules. ' +
+    'Query upcoming TV premieres and live events for ' + today.getFullYear() + '. Goal: 3–5 time-sensitive picks.\n\n' +
+    'PHASE 3 — SCORE AND RANK\n' +
+    'For every candidate, score against the taste fingerprint:\n' +
+    '  THEME MATCH (0–3) · TONE MATCH (0–2) · AVOID PENALTY (–2 if it leans on a genre/tone they\'ve clearly avoided) · ' +
+    'NOVELTY BONUS (+1 if underrepresented in their list) · RECENCY (+1 if released/airing in the last 18 months) · ' +
+    'LIVE URGENCY (mark Pass C titles airing within 7 days as URGENT).\n' +
+    'Discard anything below 3 points. Rank by score.\n\n' +
+    'PHASE 4 — OUTPUT\n' +
+    'Return EXACTLY 2 movies and 2 TV shows (4 total) — the highest-scoring picks across passes A and B. ' +
+    'Skip Pass C unless one of the four picks is naturally a live/limited-series premiere.\n\n' +
+    'ACCURACY RULES\n' +
+    '- Never fabricate availability. If you cannot confirm where a title streams, set streamingOn to "Check JustWatch".\n' +
+    '- Every "whyItFits" must reference 1–2 specific titles from the user\'s own list as comparison anchors.\n' +
+    '- Do not recommend any title already in the user\'s library (case-insensitive match on title).\n' +
+    '- Prefer specificity over volume.\n\n' +
+    'Return ONLY a single raw JSON object — no markdown fences, no explanation, no extra text — with this exact shape:\n' +
+    '{\n' +
+    '  "profile": "<2-3 sentence taste fingerprint>",\n' +
+    '  "results": [\n' +
+    '    {\n' +
+    '      "type": "Movie",\n' +
+    '      "title": "",\n' +
+    '      "year": "<4-digit year>",\n' +
+    '      "genre": "<primary genre>",\n' +
+    '      "rating": "<MPAA rating>",\n' +
+    '      "description": "<1-2 sentence plot summary>",\n' +
+    '      "director": "",\n' +
+    '      "cast": "<comma-separated top 3>",\n' +
+    '      "streamingOn": "<platform or \'Check JustWatch\'>",\n' +
+    '      "imdbScore": "<e.g. 8.2>",\n' +
+    '      "tone": "<e.g. Drama, Thriller>",\n' +
+    '      "whyItFits": "<2-3 sentences citing specific titles from their list>",\n' +
+    '      "confidence": "High | Medium | Worth a shot"\n' +
+    '    },\n' +
+    '    { "type": "Movie", ... },\n' +
+    '    {\n' +
+    '      "type": "Show",\n' +
+    '      "title": "",\n' +
+    '      "year": "<year show started>",\n' +
+    '      "genre": "<primary genre>",\n' +
+    '      "rating": "<TV rating>",\n' +
+    '      "description": "<1-2 sentence premise>",\n' +
+    '      "network": "<broadcast network or streaming service>",\n' +
+    '      "seasons": "<number>",\n' +
+    '      "status": "<Returning | Ended | Cancelled | On Hiatus>",\n' +
+    '      "nextAirs": "<YYYY-MM-DD HH:MM TZ or descriptive, empty string if unknown>",\n' +
+    '      "cast": "<comma-separated top 3>",\n' +
+    '      "streamingOn": "<streaming platform or \'Check JustWatch\'>",\n' +
+    '      "imdbScore": "<e.g. 8.2>",\n' +
+    '      "tone": "<e.g. Drama, Thriller>",\n' +
+    '      "whyItFits": "<2-3 sentences citing specific titles from their list>",\n' +
+    '      "confidence": "High | Medium | Worth a shot"\n' +
+    '    },\n' +
+    '    { "type": "Show", ... }\n' +
+    '  ]\n' +
+    '}\n\n' +
+    'Order: 2 movies first, then 2 shows. Use empty string for any field you cannot confirm. ' +
+    'The "results" array MUST contain exactly 4 entries — 2 with type "Movie" and 2 with type "Show".';
+
+  var payload = {
+    model:      ANTHROPIC_MODEL,
+    max_tokens: 4096,
+    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 12 }],
+    messages: [{ role: 'user', content: prompt }]
+  };
+
+  var fetchOptions = {
+    method:      'post',
+    contentType: 'application/json',
+    headers: {
+      'x-api-key':         apiKey,
+      'anthropic-version': '2023-06-01'
+    },
+    payload:            JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  var response, code, body;
+  for (var attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) Utilities.sleep(2000);
+    try {
+      response = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', fetchOptions);
+    } catch (netErr) {
+      if (attempt === 0) continue;
+      return { error: 'Network error contacting Anthropic: ' + netErr.message };
+    }
+    code = response.getResponseCode();
+    body = response.getContentText();
+    if (code >= 500 || code === 529) {
+      if (attempt === 0) continue;
+    }
+    break;
+  }
+
+  if (code < 200 || code >= 300) {
+    var apiErr;
+    try { apiErr = JSON.parse(body); } catch (_) {}
+    var msg = (apiErr && apiErr.error && apiErr.error.message) || body;
+    return { error: 'Anthropic API ' + code + ': ' + msg };
+  }
+
+  var apiResult;
+  try { apiResult = JSON.parse(body); }
+  catch (e) { return { error: 'Bad API response: ' + body.substring(0, 200) }; }
+
+  var text = extractTextFromContent(apiResult.content);
+  if (!text) return { error: 'Empty response from Claude' };
+
+  var parsed = parseJsonFromText(text);
+  if (!parsed || !Array.isArray(parsed.results)) {
+    return { error: 'Could not parse recommendations from response', raw: text.substring(0, 400) };
+  }
+
+  /* Filter out anything Claude accidentally returned that the user already
+     owns. Case-insensitive title match. */
+  var excludeSet = {};
+  excludedTitles.forEach(function(t) { excludeSet[t] = true; });
+  var filtered = parsed.results.filter(function(r) {
+    var t = String((r && r.title) || '').toLowerCase().trim();
+    return t && !excludeSet[t];
+  });
+
+  return {
+    profile: String(parsed.profile || ''),
+    results: filtered,
+    note:    filtered.length ? '' : 'Couldn\'t find fresh picks that aren\'t already in your library — try again later.'
+  };
 }
 
 /* Pull the concatenated text out of an Anthropic content array. With the
