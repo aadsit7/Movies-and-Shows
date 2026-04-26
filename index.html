@@ -4687,6 +4687,8 @@ function renderRecommendedResults(results) {
     if (cLow.startsWith('high')) confClass = 'confidence-high';
     else if (cLow.startsWith('med')) confClass = 'confidence-medium';
 
+    const trailerUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(title + ' trailer')}`;
+
     return `
       <div class="search-result-card">
         <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;margin-bottom:6px">
@@ -4707,6 +4709,8 @@ function renderRecommendedResults(results) {
         <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
           <button class="btn btn-primary btn-sm" style="flex:1" id="rec-save-btn-${i}"
             onclick="saveRecommendedResult(${i})">Save to Library</button>
+          <a href="${esc(trailerUrl)}" target="_blank" rel="noopener noreferrer"
+             class="btn btn-secondary btn-sm" style="flex:1;text-decoration:none;text-align:center">▶ Watch Trailer</a>
         </div>
       </div>`;
   }).join('');
