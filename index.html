@@ -3649,14 +3649,16 @@ async function deduplicateAll(silent = false) {
   if (btn) { btn.disabled = true; btn.textContent = 'Cleaning up…'; }
 
   try {
-    // Run both sheets in parallel — Content_Master dedupes by title,
-    // Live_TV_Channels dedupes by favorite_team_or_channel.
-    const [r1, r2] = await Promise.all([
+    // Run all sheets in parallel — Content_Master dedupes by title
+    // (covers Movies and Shows), Live_TV_Channels dedupes by
+    // favorite_team_or_channel.
+    const [r1, r2, r3] = await Promise.all([
+      apiPost({ action: 'removeDuplicates', sheetName: 'Movies' }),
       apiPost({ action: 'removeDuplicates', sheetName: 'Shows' }),
       apiPost({ action: 'removeDuplicates', sheetName: 'LiveTV' }),
     ]);
 
-    const removed = (r1.removed || 0) + (r2.removed || 0);
+    const removed = (r1.removed || 0) + (r2.removed || 0) + (r3.removed || 0);
 
     // If any rows were deleted the row indices are now stale — reload silently.
     if (removed > 0) await silentReload();

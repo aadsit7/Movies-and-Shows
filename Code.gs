@@ -725,65 +725,6 @@ function parseJsonFromText(text) {
   catch (_) { return null; }
 }
 
-function claudeEnrichSearch(query, sheetName) {
-  var apiKey = getAnthropicKey();
-  if (!apiKey) {
-    return { error: 'Missing ANTHROPIC_API_KEY — set it in Apps Script → Project Settings → Script Properties' };
-  }
-
-  var contentKind  = inferContentKind(sheetName);
-  var systemPrompt = buildClaudeSystemPrompt(contentKind);
-
-  var payload = {
-    model:      ANTHROPIC_MODEL,
-    max_tokens: 1024,
-    system:     systemPrompt,
-    messages: [
-      { role: 'user', content: 'Look up: ' + query }
-    ]
-  };
-
-  var response = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
-    method:             'post',
-    contentType:        'application/json',
-    headers: {
-      'x-api-key':         apiKey,
-      'anthropic-version': '2023-06-01'
-    },
-    payload:            JSON.stringify(payload),
-    muteHttpExceptions: true
-  });
-
-  var code = response.getResponseCode();
-  var body = response.getContentText();
-  if (code < 200 || code >= 300) {
-    return { error: 'Anthropic API error ' + code + ': ' + body };
-  }
-
-  var data = JSON.parse(body);
-  var text = (data.content && data.content[0] && data.content[0].text) || '';
-  return { result: text };
-}
-
-function buildClaudeSystemPrompt(contentKind) {
-  if (contentKind === 'liveTV') {
-    return 'You look up live TV channel, team, or league metadata. ' +
-      'Reply with ONLY a single JSON object using these keys: ' +
-      LIVE_TV_FIELDS.join(', ') + '. ' +
-      'Use empty strings for unknown fields. ' +
-      'No prose, no commentary, no markdown code fences.';
-  }
-  var typeLabel  = contentKind === 'TV Show' ? 'TV show' : 'movie';
-  var typeValue  = contentKind === 'TV Show' ? 'TV Show' : 'Movie';
-  return 'You look up ' + typeLabel + ' metadata. ' +
-    'Reply with ONLY a single JSON object using these keys: ' +
-    CONTENT_FIELDS.join(', ') + '. ' +
-    'Set content_type to "' + typeValue + '". ' +
-    'family_safe should be "Yes" or "No". ' +
-    'Use empty strings for unknown fields. ' +
-    'No prose, no commentary, no markdown code fences.';
-}
-
 function inferContentKind(sheetName) {
   if (isLiveTVSheet(sheetName)) return 'liveTV';
   if (isShowsSheet(sheetName))  return 'TV Show';
