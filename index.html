@@ -2856,15 +2856,53 @@ function collectThisWeek() {
     });
   });
 
-  // sort items within each day by time, alphabetically as a tiebreaker
-  Object.values(days).forEach(arr => arr.sort((a, b) => {
-    if (a.date && b.date && a.date.getTime() !== b.date.getTime()) return a.date - b.date;
+  // Within each day: chronological (earliest first), with title as a stable
+  // tiebreaker. Today (day 0) gets a smarter order so anything currently
+  // airing surfaces before later-today items, with already-aired items last.
+  const tieByTitle = (a, b) => {
     const ta = pick(norm(a.raw), 'title', 'favorite_team_or_channel', 'channel').toLowerCase();
     const tb = pick(norm(b.raw), 'title', 'favorite_team_or_channel', 'channel').toLowerCase();
     return ta.localeCompare(tb);
-  }));
+  };
+
+  // "Currently airing" = started within the last 3 hours (typical broadcast
+  // block; we don't have explicit duration data on rows). Bucket order:
+  //   0 = on now, 1 = upcoming today, 2 = earlier today.
+  const NOW_MS = now.getTime();
+  const NOW_WINDOW_MS = 3 * 60 * 60 * 1000;
+  const bucketToday = e => {
+    const t = e.date.getTime();
+    if (t > NOW_MS) return 1;
+    if (t >= NOW_MS - NOW_WINDOW_MS) return 0;
+    return 2;
+  };
+
+  if (days[0]) {
+    days[0].sort((a, b) => {
+      const ba = bucketToday(a), bb = bucketToday(b);
+      if (ba !== bb) return ba - bb;
+      if (a.date.getTime() !== b.date.getTime()) return a.date - b.date;
+      return tieByTitle(a, b);
+    });
+  }
+  for (let i = 1; i < 7; i++) {
+    if (!days[i]) continue;
+    days[i].sort((a, b) => {
+      if (a.date.getTime() !== b.date.getTime()) return a.date - b.date;
+      return tieByTitle(a, b);
+    });
+  }
 
   return { days };
+}
+
+/* True when this entry's start time is within the "currently airing" window
+   (started in the last 3h, not yet in the future). */
+function isAiringNow(entry) {
+  if (!entry || !entry.date) return false;
+  const t = entry.date.getTime();
+  const NOW_MS = Date.now();
+  return t <= NOW_MS && t >= NOW_MS - 3 * 60 * 60 * 1000;
 }
 
 function renderScheduleItem(entry) {
@@ -3112,19 +3150,27 @@ function renderScheduleTab() {
   // "Up Next" hero — the single soonest upcoming item, shown at the top when not filtering
   if (!query) html += renderNextUpHero(days);
   // Iterate the next 7 days; nearest date sections appear first automatically.
+  // Current-time string for the Today header so the user always sees "now".
+  const nowH = now.getHours(), nowM = now.getMinutes();
+  const nowAmpm = nowH >= 12 ? 'pm' : 'am';
+  const nowTime = `${nowH % 12 || 12}:${String(nowM).padStart(2,'0')}${nowAmpm}`;
+
   for (let i = 0; i < 7; i++) {
     const allItems = days[i];
     if (!allItems || !allItems.length) continue;
     const items = allItems.filter(scheduleMatchesQuery);
     if (!items.length) continue;
-    const d     = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
-    const label = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : DAY_NAMES[d.getDay()];
-    const cls   = i === 0 ? 'schedule-today' : i === 1 ? 'schedule-tomorrow' : '';
+    const d        = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
+    const label    = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : DAY_NAMES[d.getDay()];
+    const cls      = i === 0 ? 'schedule-today' : i === 1 ? 'schedule-tomorrow' : '';
+    const dateText = i === 0
+      ? `${MON_NAMES[d.getMonth()]} ${d.getDate()} · ${nowTime}`
+      : `${MON_NAMES[d.getMonth()]} ${d.getDate()}`;
     html += `
       <div class="schedule-day-section">
         <div class="schedule-day-header">
           <span class="schedule-day-label ${cls}">${label}</span>
-          <span class="schedule-day-date">${MON_NAMES[d.getMonth()]} ${d.getDate()}</span>
+          <span class="schedule-day-date">${dateText}</span>
           <span class="schedule-day-count">${items.length}</span>
         </div>
         <div class="schedule-items">
@@ -4740,31 +4786,23 @@ async function saveRecommendedResult(idx) {
    INIT
 ════════════════════════════════════════════════════════════ */
 (function init() {
-  // Start on Guide tab (shows the library)
-  S.tab = 'shows';
-  renderSubHeader('shows');
+  // Default to the Schedule (📅) view so the home screen is "what's on today
+  // and the next 7 days," with currently-airing items at the top of Today.
+  S.tab = 'upcoming';
+  renderSubHeader('upcoming');
 
   // Side menu reflects the active tab on first paint.
   renderSideMenu();
 
-  // Show tab-shows panel, hide others
+  // Show tab-upcoming panel, hide others
   document.querySelectorAll('.tab-panel').forEach(el => el.classList.remove('active'));
-  const guidePanel = document.getElementById('tab-shows');
-  if (guidePanel) guidePanel.classList.add('active');
+  const schedulePanel = document.getElementById('tab-upcoming');
+  if (schedulePanel) schedulePanel.classList.add('active');
 
   // Restore cached data for instant display
   const hasCached = restoreCache();
   if (hasCached) {
-    renderLibrary();
-  } else {
-    const libGrid = document.getElementById('grid-library');
-    if (libGrid) libGrid.innerHTML = Array.from({ length: 6 }, () => `
-      <div class="skeleton-card">
-        <div class="skel skel-title"></div>
-        <div class="skel skel-sub"></div>
-        <div class="skel skel-badge" style="margin:10px 0 6px"></div>
-        <div class="skel skel-desc"></div>
-      </div>`).join('');
+    renderScheduleTab();
   }
 
   loadAllData()
