@@ -376,7 +376,7 @@ function doPost(e) {
     if (action === 'addRow')            return respondJson(handleAddRow(body.sheetName, body.rowData));
     if (action === 'updateRow')         return respondJson(handleUpdateRow(body.sheetName, body.rowIndex, body.rowData));
     if (action === 'deleteRow')         return respondJson(handleDeleteRow(body.sheetName, body.rowIndex));
-    if (action === 'claudeSearch')      return respondJson(handleClaudeSearch(body.query, body.sheetName));
+    if (action === 'claudeSearch')      return respondJson(handleClaudeSearch(body.query, body.sheetName, body.clientDatetime));
     if (action === 'recommendForMe')    return respondJson(handleRecommendForMe());
     if (action === 'removeDuplicates')  return respondJson(removeDuplicatesFromSheet(body.sheetName));
     if (action === 'saveEpisodes')      return respondJson(handleSaveEpisodes(body.title, body.episodes));
@@ -900,7 +900,7 @@ function writeScheduleRows(sheetName, fields, joinKey, joinValue, rows) {
 }
 
 /* ── Claude search (with web_search tool) ────────────────── */
-function handleClaudeSearch(query, sheetName) {
+function handleClaudeSearch(query, sheetName, clientDatetime) {
   var settings = getSettings();
   if (!settingEnabled(settings, 'search_enabled')) {
     return { error: 'Search is currently disabled. Enable it in the Settings sheet (search_enabled = TRUE).' };
@@ -911,14 +911,33 @@ function handleClaudeSearch(query, sheetName) {
     return { error: 'Missing ANTHROPIC_API_KEY — set it in Apps Script → Project Settings → Script Properties' };
   }
 
-  var today = new Date();
-  var yyyy  = today.getFullYear();
-  var mm    = String(today.getMonth() + 1).padStart(2, '0');
-  var dd    = String(today.getDate()).padStart(2, '0');
-  var todayStr = yyyy + '-' + mm + '-' + dd;
+  var localDate, localTime;
+  if (clientDatetime) {
+    var dtMatch = String(clientDatetime).match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+    if (dtMatch) { localDate = dtMatch[1]; localTime = dtMatch[2]; }
+  }
+  if (!localDate) {
+    var today = new Date();
+    localDate = today.getFullYear() + '-' +
+      String(today.getMonth() + 1).padStart(2, '0') + '-' +
+      String(today.getDate()).padStart(2, '0');
+    localTime = '';
+  }
+
+  var nowContext = localTime
+    ? 'Today\'s date is ' + localDate + ' and the user\'s current local time is ' + localTime + '.'
+    : 'Today\'s date is ' + localDate + '.';
+
+  var sportsLiveNote = localTime
+    ? 'CRITICAL FOR SPORTS/LIVE TV: Use ' + localDate + ' as today\'s date when searching schedules. ' +
+      'If a game or event for the searched team is currently in progress right now (its scheduled start time is at or before ' + localTime + ' and a typical game duration means it has not yet ended), ' +
+      'you MUST include it first in the games array at its actual scheduled start time — do NOT skip or omit currently live games. ' +
+      'Always verify today\'s full schedule before listing future dates.\n\n'
+    : '';
 
   var prompt =
-    'You are a media database assistant. Today\'s date is ' + todayStr + '. The user searched for: "' + query + '"\n\n' +
+    'You are a media database assistant. ' + nowContext + ' The user searched for: "' + query + '"\n\n' +
+    sportsLiveNote +
     'Use the web_search tool (up to 8 times) to look up current, accurate information from ' +
     'credible sources (IMDb, Rotten Tomatoes, Wikipedia, official network and streaming-service pages, ' +
     'TV Guide, Sports Reference). Search specifically for the next air date / next game if applicable.\n\n' +
