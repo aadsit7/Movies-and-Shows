@@ -2165,22 +2165,6 @@ function renderSubHeader(tab) {
           title="Toggle calendar view">
           🗓
         </button>
-        <button class="update-all-btn"
-          id="schedule-refresh-btn"
-          onclick="refreshScheduleFromSheet()"
-          title="Pull latest air dates from Google Sheet">
-          <span class="ua-icon">↻</span>
-          <span>Refresh</span>
-        </button>
-        <button id="sub-update-all-btn"
-          class="update-all-btn${updating ? ' updating' : ''}"
-          ${updating ? 'disabled' : ''}
-          onclick="updateAll()"
-          title="Re-fetch all air dates from Claude and save to sheet">
-          <span class="ua-icon">✦</span>
-          <span>Update All</span>
-          <span id="sub-update-all-count" class="ua-count">${updating && S.updateProgress ? S.updateProgress : ''}</span>
-        </button>
       </div>`;
     return;
   }
