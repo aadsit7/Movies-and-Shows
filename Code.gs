@@ -1,13 +1,18 @@
 /* ═══════════════════════════════════════════════════════════
    Family Media Tracker — Apps Script backend
    Sheet layout:
-     Content_Master  — movies (content_type="Movie") and
-                        shows  (content_type="TV Show")
-     Live_TV_Channels — live TV entries
+     Content_Master    — movies (content_type="Movie") and
+                          shows  (content_type="TV Show")
+     Live_TV_Channels  — live TV / sports team entries
+     Episode_Schedule  — per-episode air dates, joined to shows by title
+     Schedules         — per-game dates, joined to live TV by channel_id
+                          (matched against favorite_team_or_channel)
 ════════════════════════════════════════════════════════════ */
 
-var CONTENT_MASTER  = 'Content_Master';
-var LIVE_TV_SHEET   = 'Live_TV_Channels';
+var CONTENT_MASTER     = 'Content_Master';
+var LIVE_TV_SHEET      = 'Live_TV_Channels';
+var EPISODE_SCHEDULE   = 'Episode_Schedule';
+var SCHEDULES_SHEET    = 'Schedules';
 
 /* Anthropic API key — set in Apps Script Project Settings → Script Properties.
    Property name: ANTHROPIC_API_KEY
@@ -38,6 +43,17 @@ var LIVE_TV_FIELDS = [
   'default_channel_or_provider', 'profile_name',
   'network', 'genre', 'description', 'streaming_on',
   'next_game', 'tv_channel'
+];
+/* Episode_Schedule: one row per upcoming/recent episode; joined to a show
+   by lowercased title. air_date should be ISO YYYY-MM-DD when known. */
+var EPISODE_FIELDS = [
+  'title', 'season', 'episode', 'episode_title', 'air_date', 'network'
+];
+/* Schedules: one row per game; joined to a live-TV team/channel by
+   channel_id (matched against favorite_team_or_channel). date should be
+   ISO YYYY-MM-DD; time is free-form (e.g. "7:10 PM PT"). */
+var SCHEDULE_FIELDS = [
+  'channel_id', 'team', 'league', 'date', 'time', 'opponent', 'tv_channel'
 ];
 
 /* ── Cache ───────────────────────────────────────────────── */
@@ -73,6 +89,8 @@ function doPost(e) {
     if (action === 'deleteRow')         return respondJson(handleDeleteRow(body.sheetName, body.rowIndex));
     if (action === 'claudeSearch')      return respondJson(handleClaudeSearch(body.query, body.sheetName));
     if (action === 'removeDuplicates')  return respondJson(removeDuplicatesFromSheet(body.sheetName));
+    if (action === 'saveEpisodes')      return respondJson(handleSaveEpisodes(body.title, body.episodes));
+    if (action === 'saveGames')         return respondJson(handleSaveGames(body.channelId, body.games));
 
     return respondJson({ error: 'Unknown action: ' + action });
   } catch (err) {
@@ -162,7 +180,99 @@ function fetchAllMediaFromSheet() {
     }
   }
 
+  /* Episode_Schedule — group rows by lowercased title and attach the
+     upcoming/recent episodes to the matching show. The earliest upcoming
+     episode also fills next_airs / latest_episode if those are blank. */
+  var episodesByTitle = readScheduleRows(ss, EPISODE_SCHEDULE, EPISODE_FIELDS, 'title');
+  attachSchedule(shows, 'title', episodesByTitle, function(item, list) {
+    item.episodes = list;
+    var upcoming = pickUpcoming(list, 'air_date');
+    if (upcoming) {
+      if (!item.next_airs) item.next_airs = upcoming.air_date || '';
+      if (!item.latest_episode && (upcoming.season || upcoming.episode || upcoming.episode_title)) {
+        var s = upcoming.season ? 'S' + String(upcoming.season).padStart(2, '0') : '';
+        var e = upcoming.episode ? 'E' + String(upcoming.episode).padStart(2, '0') : '';
+        var t = upcoming.episode_title ? ' ' + upcoming.episode_title : '';
+        item.latest_episode = (s + e + t).trim();
+      }
+    }
+  });
+
+  /* Schedules — group rows by lowercased channel_id and attach upcoming
+     games to the matching live-TV entry. The earliest upcoming game fills
+     next_game / tv_channel if blank. */
+  var gamesByChannel = readScheduleRows(ss, SCHEDULES_SHEET, SCHEDULE_FIELDS, 'channel_id');
+  attachSchedule(liveTV, 'favorite_team_or_channel', gamesByChannel, function(item, list) {
+    item.games = list;
+    var upcoming = pickUpcoming(list, 'date');
+    if (upcoming) {
+      if (!item.next_game) {
+        var when = upcoming.date || '';
+        if (upcoming.time) when += (when ? ' ' : '') + upcoming.time;
+        if (upcoming.opponent) when += ' vs ' + upcoming.opponent;
+        item.next_game = when.trim();
+      }
+      if (!item.tv_channel && upcoming.tv_channel) item.tv_channel = upcoming.tv_channel;
+    }
+  });
+
   return { success: true, movies: movies, shows: shows, liveTV: liveTV };
+}
+
+/* Read a schedule-style sheet (Episode_Schedule / Schedules) and return
+   { keyLower: [rows] }. Rows are projected to the supplied field list and
+   keyed case-insensitively on the join column so a sheet with "Seahawks"
+   matches a live-TV entry "seahawks". */
+function readScheduleRows(ss, sheetName, fields, joinKey) {
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return {};
+  ensureColumns(sheet, fields);
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return {};
+  var headers = normalizeHeaders(data[0]);
+  var groups = {};
+  for (var i = 1; i < data.length; i++) {
+    var row = buildObj(headers, data[i]);
+    var key = String(row[joinKey] || '').toLowerCase().trim();
+    if (!key) continue;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(projectFields(row, fields));
+  }
+  return groups;
+}
+
+/* For each item in the list, look up its grouped rows and run the writer
+   callback to attach them. itemKey is the field on the item that matches
+   the schedule sheet's join column. */
+function attachSchedule(items, itemKey, groups, writer) {
+  if (!items || !items.length) return;
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    var key  = String(item[itemKey] || '').toLowerCase().trim();
+    var list = groups[key] || [];
+    writer(item, list);
+  }
+}
+
+/* Pick the earliest row whose date column (parsed as YYYY-MM-DD) is today
+   or later. Falls back to the very first row when nothing parses, so a
+   detail card always has something to show. */
+function pickUpcoming(rows, dateField) {
+  if (!rows || !rows.length) return null;
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+  var best = null, bestTime = Infinity;
+  for (var i = 0; i < rows.length; i++) {
+    var raw = String(rows[i][dateField] || '').trim();
+    if (!raw) continue;
+    var m = raw.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (!m) continue;
+    var d = new Date(+m[1], +m[2] - 1, +m[3]);
+    if (isNaN(d.getTime())) continue;
+    if (d.getTime() < today.getTime()) continue;
+    if (d.getTime() < bestTime) { best = rows[i]; bestTime = d.getTime(); }
+  }
+  return best || rows[0];
 }
 
 /* ── Ensure columns exist ────────────────────────────────── */
@@ -406,6 +516,65 @@ function handleDeleteRow(sheetName, rowIndex) {
   return { success: true };
 }
 
+/* ── Save episode rows to Episode_Schedule ───────────────── */
+/* Replaces all rows for the given show title, then appends the new ones.
+   Title is matched case-insensitively. Returns { success, written }. */
+function handleSaveEpisodes(title, episodes) {
+  if (!title) return { error: 'Missing title' };
+  if (!Array.isArray(episodes)) return { error: 'episodes must be an array' };
+  return writeScheduleRows(EPISODE_SCHEDULE, EPISODE_FIELDS, 'title', title, episodes);
+}
+
+/* ── Save game rows to Schedules ─────────────────────────── */
+/* Replaces all rows for the given channelId, then appends the new ones.
+   channelId is matched against the channel_id column case-insensitively
+   and stamped onto every appended row. Returns { success, written }. */
+function handleSaveGames(channelId, games) {
+  if (!channelId) return { error: 'Missing channelId' };
+  if (!Array.isArray(games)) return { error: 'games must be an array' };
+  return writeScheduleRows(SCHEDULES_SHEET, SCHEDULE_FIELDS, 'channel_id', channelId, games);
+}
+
+function writeScheduleRows(sheetName, fields, joinKey, joinValue, rows) {
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+    sheet.appendRow(fields);
+  } else {
+    ensureColumns(sheet, fields);
+  }
+
+  var data    = sheet.getDataRange().getValues();
+  var headers = data.length > 0 ? normalizeHeaders(data[0]) : fields.slice();
+  var keyIdx  = headers.indexOf(joinKey);
+  var matchLc = String(joinValue).toLowerCase().trim();
+
+  /* Delete existing rows for this join value (bottom-up to keep indices valid) */
+  if (keyIdx !== -1) {
+    for (var i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][keyIdx]).toLowerCase().trim() === matchLc) {
+        sheet.deleteRow(i + 1);
+      }
+    }
+  }
+
+  /* Append the new rows. The join column is force-stamped so callers can
+     omit it (they're already telling us the join value). */
+  var written = 0;
+  for (var r = 0; r < rows.length; r++) {
+    var src = rows[r] || {};
+    var obj = {};
+    fields.forEach(function(f) { obj[f] = src[f] !== undefined ? src[f] : ''; });
+    obj[joinKey] = joinValue;
+    appendByHeaders(sheet, obj);
+    written++;
+  }
+
+  invalidateCache();
+  return { success: true, written: written };
+}
+
 /* ── Claude search (with web_search tool) ────────────────── */
 function handleClaudeSearch(query, sheetName) {
   var apiKey = getAnthropicKey();
@@ -427,11 +596,11 @@ function handleClaudeSearch(query, sheetName) {
     'Return ONLY a single raw JSON object — no markdown fences, no explanation, no extra text.\n\n' +
     'For a Movie use exactly these keys:\n' +
     '{"type":"Movie","title":"","year":"<4-digit year>","genre":"<primary genre>","rating":"<MPAA rating e.g. PG-13>","description":"<1-2 sentence plot summary>","director":"","cast":"<comma-separated top 3 actors>","streamingOn":"<platform name>","imdbScore":"<e.g. 8.2>","tone":"<e.g. Action, Comedy, Drama, Thriller>"}\n\n' +
-    'For a TV Show use exactly these keys:\n' +
-    '{"type":"Show","title":"","year":"<year show started>","genre":"<primary genre>","rating":"<TV rating e.g. TV-MA>","description":"<1-2 sentence premise>","network":"<broadcast network or streaming service>","seasons":"<number>","latestEpisode":"<S##E## Title if known>","status":"<Returning | Ended | Cancelled | On Hiatus>","nextAirs":"<YYYY-MM-DD HH:MM TZ or descriptive e.g. \'Tuesdays 9PM ET on NBC\'>","cast":"<comma-separated top 3 actors>","streamingOn":"<streaming platform if different from network>","imdbScore":"<e.g. 8.2>","tone":"<e.g. Drama, Comedy, Thriller>"}\n\n' +
-    'For Live TV / Sports channel use exactly these keys:\n' +
-    '{"type":"LiveTV","channel":"<channel or team name>","network":"<broadcast network>","league":"<e.g. NFL, NBA, EPL>","genre":"<Sports | News | Entertainment>","description":"<brief description>","streamingOn":"<streaming platform>","nextGame":"<YYYY-MM-DD HH:MM TZ or descriptive>","tvChannel":"<cable/satellite channel name>"}\n\n' +
-    'Rules: real data only; leave a field empty string if truly unknown; dates MUST be in YYYY-MM-DD format when an exact date is known.';
+    'For a TV Show use exactly these keys (and include an "episodes" array of the next 5 upcoming or most recent episodes when known):\n' +
+    '{"type":"Show","title":"","year":"<year show started>","genre":"<primary genre>","rating":"<TV rating e.g. TV-MA>","description":"<1-2 sentence premise>","network":"<broadcast network or streaming service>","seasons":"<number>","latestEpisode":"<S##E## Title if known>","status":"<Returning | Ended | Cancelled | On Hiatus>","nextAirs":"<YYYY-MM-DD HH:MM TZ or descriptive e.g. \'Tuesdays 9PM ET on NBC\'>","cast":"<comma-separated top 3 actors>","streamingOn":"<streaming platform if different from network>","imdbScore":"<e.g. 8.2>","tone":"<e.g. Drama, Comedy, Thriller>","episodes":[{"season":"5","episode":"3","episode_title":"","air_date":"YYYY-MM-DD","network":""}]}\n\n' +
+    'For Live TV / Sports channel use exactly these keys (and include a "games" array of the next 5 games when known):\n' +
+    '{"type":"LiveTV","channel":"<channel or team name>","network":"<broadcast network>","league":"<e.g. NFL, NBA, EPL>","genre":"<Sports | News | Entertainment>","description":"<brief description>","streamingOn":"<streaming platform>","nextGame":"<YYYY-MM-DD HH:MM TZ or descriptive>","tvChannel":"<cable/satellite channel name>","games":[{"date":"YYYY-MM-DD","time":"7:10 PM PT","opponent":"","tv_channel":""}]}\n\n' +
+    'Rules: real data only; leave a field empty string if truly unknown; dates MUST be in YYYY-MM-DD format when an exact date is known. Return at most 5 episodes / games. Omit the array (or return []) if you cannot find scheduled dates.';
 
   var payload = {
     model:      ANTHROPIC_MODEL,
@@ -480,6 +649,34 @@ function handleClaudeSearch(query, sheetName) {
   if (sheetName) {
     try { handleAddRow(sheetName, mediaData); } catch (writeErr) { /* don't fail search on write */ }
   }
+
+  /* Persist episodes / games arrays so the schedule sheets stay in sync
+     with whatever Claude just returned. Failures here must not break the
+     search response — the card data is still useful on its own. */
+  try {
+    var resultType = String(mediaData.type || '').toLowerCase();
+    if (Array.isArray(mediaData.episodes) && mediaData.episodes.length &&
+        (resultType.indexOf('show') !== -1 || resultType.indexOf('series') !== -1)) {
+      var showTitle = mediaData.title || '';
+      if (showTitle) handleSaveEpisodes(showTitle, mediaData.episodes);
+    }
+    if (Array.isArray(mediaData.games) && mediaData.games.length &&
+        (resultType.indexOf('live') !== -1 || resultType.indexOf('sport') !== -1 ||
+         resultType.indexOf('team') !== -1 || resultType.indexOf('channel') !== -1)) {
+      var channelId = mediaData.channel || mediaData.title || '';
+      if (channelId) {
+        /* Stamp team/league onto each row so the Schedules sheet is
+           self-describing — useful when a single sheet has rows from many teams. */
+        var stamped = mediaData.games.map(function(g) {
+          var copy = shallowCopy(g || {});
+          if (!copy.team)   copy.team   = channelId;
+          if (!copy.league) copy.league = mediaData.league || '';
+          return copy;
+        });
+        handleSaveGames(channelId, stamped);
+      }
+    }
+  } catch (scheduleErr) { /* surface nothing; schedules are best-effort */ }
 
   return { success: true, data: mediaData };
 }
