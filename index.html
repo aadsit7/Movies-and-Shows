@@ -1226,9 +1226,10 @@
 ════════════════════════════════════════════════════════════ -->
 <div id="app">
 
-  <!-- Top header: app title centered + cyan refresh icon -->
+  <!-- Top header: app title centered + settings + refresh icons -->
   <header id="app-header">
     <h1 class="app-title">Family Media Tracker</h1>
+    <button class="header-refresh" style="right:48px" onclick="switchTab('settings')" aria-label="Settings" title="Settings">⚙️</button>
     <button class="header-refresh" onclick="loadAllData()" aria-label="Refresh" title="Refresh">↻</button>
   </header>
 
@@ -1243,8 +1244,8 @@
       <div class="cards-grid" id="grid-library"></div>
     </div>
 
-    <!-- Schedule tab -->
-    <div id="tab-schedule" class="tab-panel active">
+    <!-- Upcoming tab -->
+    <div id="tab-upcoming" class="tab-panel active">
       <div id="schedule-body"></div>
     </div>
 
@@ -1257,6 +1258,9 @@
 
   <!-- Bottom navigation (4 tabs) -->
   <nav id="bottom-nav">
+    <button class="nav-btn active" id="nav-upcoming" onclick="switchTab('upcoming')">
+      <span class="nav-icon">📅</span>Upcoming
+    </button>
     <button class="nav-btn" id="nav-tab-movies"
       onclick="switchTab('shows');setLibraryType('movies');document.querySelectorAll('#bottom-nav .nav-btn').forEach(b=>b.classList.remove('active'));this.classList.add('active')">
       <span class="nav-icon">🎬</span>Movies
@@ -1268,9 +1272,6 @@
     <button class="nav-btn" id="nav-tab-livetv"
       onclick="switchTab('shows');setLibraryType('livetv');document.querySelectorAll('#bottom-nav .nav-btn').forEach(b=>b.classList.remove('active'));this.classList.add('active')">
       <span class="nav-icon">📡</span>Live TV
-    </button>
-    <button class="nav-btn" id="nav-settings" onclick="switchTab('settings')">
-      <span class="nav-icon">⚙️</span>Settings
     </button>
   </nav>
 </div>
@@ -1359,9 +1360,9 @@ const S = {
   movies:       [],
   shows:        [],
   livetv:       [],
-  tab:          'schedule',
+  tab:          'upcoming',
   libraryType:  'all',   // 'all' | 'movies' | 'shows' | 'livetv'
-  filter:       { shows: '', schedule: '', settings: '' },
+  filter:       { shows: '', upcoming: '', schedule: '', settings: '' },
   connStatus:   null,   // 'ok' | 'err' | null
   lastSynced:   null,
   refreshingAll:  false,
@@ -1677,7 +1678,8 @@ function switchTab(tab) {
 
   // nav highlight
   document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
-  document.getElementById('nav-' + tab).classList.add('active');
+  const navBtn = document.getElementById('nav-' + tab);
+  if (navBtn) navBtn.classList.add('active');
 
   // FAB: show on all content tabs (hide only on settings)
   document.getElementById('fab').classList.toggle('hidden', tab === 'settings');
@@ -1690,7 +1692,7 @@ function switchTab(tab) {
     return;
   }
 
-  if (tab === 'schedule') {
+  if (tab === 'upcoming') {
     renderScheduleTab();
     loadAllData();
     return;
@@ -1715,16 +1717,16 @@ function switchTab(tab) {
 function renderSubHeader(tab) {
   const el = document.getElementById('sub-header');
 
-  if (tab === 'schedule') {
+  if (tab === 'upcoming') {
     const updating = S.refreshingAll;
     el.innerHTML = `
       <div class="sub-header-row">
         <div class="search-wrap">
           <input type="search" class="filter-input"
-            placeholder="Search schedule…"
-            value="${esc(S.filter.schedule || '')}"
+            placeholder="Search upcoming…"
+            value="${esc(S.filter.upcoming || '')}"
             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-            oninput="onFilter('schedule', this.value)"
+            oninput="onFilter('upcoming', this.value)"
           >
         </div>
         <button class="cal-toggle-btn${S.calendarView ? ' active' : ''}"
@@ -1802,7 +1804,7 @@ function onFilter(tab, val) {
   S.filter[tab] = val;
   clearTimeout(_filterTimer);
   _filterTimer = setTimeout(() => {
-    if (tab === 'schedule') renderScheduleTab();
+    if (tab === 'upcoming' || tab === 'schedule') renderScheduleTab();
     else if (tab === 'shows') renderLibrary();
     else if (tab === 'settings') renderSettingsFilter();
   }, 150);
@@ -1971,6 +1973,7 @@ function loadAllData() {
     .then(r => r.text())
     .then(text => {
       const data = JSON.parse(text);
+      console.log('Full response:', JSON.stringify(data).slice(0,1000));
       S.movies = data.movies || [];
       S.shows  = data.shows  || [];
       S.livetv = data.liveTV || [];
@@ -2021,11 +2024,11 @@ function renderLiveTV(items) {
 }
 
 async function loadTabData(tab) {
-  if (tab === 'schedule') {
+  if (tab === 'upcoming' || tab === 'schedule') {
     document.getElementById('schedule-body').innerHTML = `
       <div class="empty-state">
         <div class="big-icon" style="animation:spin 1s linear infinite;display:inline-block">↻</div>
-        <p>Loading schedule…</p>
+        <p>Loading upcoming…</p>
       </div>`;
   } else {
     const libGrid = document.getElementById('grid-library');
@@ -2046,19 +2049,19 @@ async function loadTabData(tab) {
     S.connStatus = 'ok';
     _indexDirty  = true;
     saveCache();
-    if (tab === 'schedule') renderScheduleTab();
+    if (tab === 'upcoming' || tab === 'schedule') renderScheduleTab();
     else renderLibrary();
   } catch (err) {
     console.error('loadTabData:', err);
     S.connStatus = 'err';
-    if (tab === 'schedule') {
+    if (tab === 'upcoming' || tab === 'schedule') {
       document.getElementById('schedule-body').innerHTML = `
         <div class="error-state">
           <div class="big-icon">⚠️</div>
-          <h3>Couldn't load schedule</h3>
+          <h3>Couldn't load upcoming</h3>
           <p>Check your connection and sheet setup.</p>
           <button class="btn btn-secondary btn-sm" style="margin-top:14px"
-            onclick="loadTabData('schedule')">Try Again</button>
+            onclick="loadTabData('upcoming')">Try Again</button>
         </div>`;
     } else {
       const libGrid = document.getElementById('grid-library');
@@ -2419,7 +2422,7 @@ function toggleCalendarView() {
 function renderCalendarView() {
   const weekOffset = S.calendarWeek || 0;
   const { monday, cols } = collectCalendarWeek(weekOffset);
-  const query = (S.filter.schedule || '').toLowerCase().trim();
+  const query = (S.filter.upcoming || S.filter.schedule || '').toLowerCase().trim();
   const scheduleWords = query ? query.split(/\s+/).filter(Boolean) : [];
 
   const today = new Date();
@@ -2504,7 +2507,7 @@ function renderScheduleTab() {
   }
 
   const { days, recurring } = collectThisWeek();
-  const query = (S.filter.schedule || '').toLowerCase().trim();
+  const query = (S.filter.upcoming || S.filter.schedule || '').toLowerCase().trim();
   const now = new Date();
   const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const MON_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -2565,15 +2568,49 @@ function renderScheduleTab() {
   }
 
   if (!html) {
-    html = query
-      ? `<div class="empty-state">
+    if (query) {
+      html = `<div class="empty-state">
           <div class="big-icon">📅</div>
           <p>No results for &ldquo;${esc(query)}&rdquo;</p>
-        </div>`
-      : `<div class="empty-state">
-          <div class="big-icon">📅</div>
-          <p>Nothing scheduled in the next 30 days.<br>Tap ↻ Refresh to pull the latest from your sheet,<br>or tap 🔄 on any card to fetch its air date from the web.</p>
         </div>`;
+    } else {
+      /* Fallback: no scheduled dates — show all shows + live TV sorted by any available date,
+         then alphabetically. Sports teams (Seahawks, Mariners) appear alongside shows. */
+      const allItems = [
+        ...S.shows.map((raw, idx) => ({ raw, idx, tab: 'shows' })),
+        ...S.livetv.map((raw, idx) => ({ raw, idx, tab: 'livetv' })),
+      ].sort((a, b) => {
+        const na = norm(a.raw), nb = norm(b.raw);
+        const sa = a.tab === 'livetv'
+          ? pick(na, 'nextgame', 'next_game', 'nextairs') : pick(na, 'nextairs', 'nextairing');
+        const sb = b.tab === 'livetv'
+          ? pick(nb, 'nextgame', 'next_game', 'nextairs') : pick(nb, 'nextairs', 'nextairing');
+        const da = parseAiringDate(sa), db = parseAiringDate(sb);
+        if (da && db) return da - db;
+        if (da) return -1;
+        if (db) return 1;
+        const ta = pick(na, 'title', 'favorite_team_or_channel', 'channel').toLowerCase();
+        const tb = pick(nb, 'title', 'favorite_team_or_channel', 'channel').toLowerCase();
+        return ta < tb ? -1 : ta > tb ? 1 : 0;
+      });
+      if (allItems.length) {
+        html = `<div class="schedule-day-section">
+          <div class="schedule-day-header">
+            <span class="schedule-day-label">All Shows &amp; Live TV</span>
+            <span class="schedule-day-date">Add dates via ↻ on any card</span>
+            <span class="schedule-day-count">${allItems.length}</span>
+          </div>
+          <div class="schedule-items">
+            ${allItems.map(e => renderScheduleItem({ ...e, text: '', date: null })).join('')}
+          </div>
+        </div>`;
+      } else {
+        html = `<div class="empty-state">
+          <div class="big-icon">📅</div>
+          <p>Nothing here yet.<br>Tap + to add shows and sports teams to your library.</p>
+        </div>`;
+      }
+    }
   }
 
   container.innerHTML = html;
@@ -3686,8 +3723,8 @@ async function autoSyncMissingSchedules() {
    INIT
 ════════════════════════════════════════════════════════════ */
 (function init() {
-  S.tab = 'schedule';
-  renderSubHeader('schedule');
+  S.tab = 'upcoming';
+  renderSubHeader('upcoming');
 
   // Restore last-known data from localStorage so the schedule is visible instantly.
   const hasCached = restoreCache();
@@ -3698,7 +3735,7 @@ async function autoSyncMissingSchedules() {
     if (schedBody) schedBody.innerHTML = `
       <div class="empty-state">
         <div class="big-icon" style="animation:spin 1s linear infinite;display:inline-block">↻</div>
-        <p>Loading schedule…</p>
+        <p>Loading upcoming…</p>
       </div>`;
   }
 

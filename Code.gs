@@ -147,12 +147,13 @@ function fetchAllMediaFromSheet() {
         if (!key) continue;            // skip blank rows
         var item = projectFields(row, CONTENT_FIELDS);
         item.rowIndex = i + 1;
-        var ct = String(row['content_type'] || '').trim();
-        if (ct === 'Movie') {
+        var ctRaw = String(row['content_type'] || '').trim();
+        var ct    = ctRaw.toLowerCase();
+        if (ct === 'movie') {
           if (seenMovies[key]) continue;
           seenMovies[key] = true;
           movies.push(item);
-        } else if (ct === 'TV Show') {
+        } else if (ct === 'tv show' || ct === 'show' || ct === 'series') {
           if (seenShows[key]) continue;
           seenShows[key] = true;
           shows.push(item);
@@ -341,7 +342,7 @@ function hasDuplicate(sheet, titleHeader, newTitle, contentType) {
   var ctIdx = contentType ? headers.indexOf('content_type') : -1;
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][titleIdx]).toLowerCase().trim() !== newTitle) continue;
-    if (ctIdx !== -1 && String(data[i][ctIdx]).trim() !== contentType) continue;
+    if (ctIdx !== -1 && String(data[i][ctIdx]).trim().toLowerCase() !== contentType.toLowerCase()) continue;
     return true;
   }
   return false;
