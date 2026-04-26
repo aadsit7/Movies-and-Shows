@@ -55,13 +55,13 @@ var CONTENT_FIELDS = [
   'title', 'content_type', 'genre_primary', 'age_rating',
   'description', 'year_started', 'seasons_count', 'tone', 'family_safe',
   'streaming_on', 'imdb_score', 'cast', 'director',
-  'network', 'status', 'latest_episode', 'next_airs'
+  'network', 'status', 'latest_episode', 'next_airs', 'favorites'
 ];
 var LIVE_TV_FIELDS = [
   'favorite_team_or_channel', 'live_tv_type', 'league',
   'default_channel_or_provider', 'profile_name',
   'network', 'genre', 'description', 'streaming_on',
-  'next_game', 'tv_channel'
+  'next_game', 'tv_channel', 'favorites'
 ];
 /* Episode_Schedule: one row per upcoming/recent episode; joined to a show
    by lowercased title. air_date should be ISO YYYY-MM-DD when known. */
@@ -465,6 +465,7 @@ function fetchAllMediaFromSheet() {
             live_tv_type:             ctRaw || fmt || 'Sports',
             league:                   String(row['genre_primary'] || '').trim(),
             description:              String(row['description']   || '').trim(),
+            favorites:                String(row['favorites']     || '').trim(),
             rowIndex:                 i + 1,
           });
         }
@@ -740,7 +741,8 @@ function mapToSheetRow(data, kind) {
       description:   firstOf(data, ['description']),
       streaming_on:  firstOf(data, ['streamingOn', 'streaming_on']),
       next_game:     firstOf(data, ['nextGame', 'next_game', 'nextAirs', 'next_airs']),
-      tv_channel:    firstOf(data, ['tvChannel', 'tv_channel'])
+      tv_channel:    firstOf(data, ['tvChannel', 'tv_channel']),
+      favorites:     firstOf(data, ['favorites', 'favorite'])
     };
   }
 
@@ -762,7 +764,8 @@ function mapToSheetRow(data, kind) {
     network:        firstOf(data, ['network']),
     status:         firstOf(data, ['status']),
     latest_episode: firstOf(data, ['latestEpisode', 'latest_episode']),
-    next_airs:      firstOf(data, ['nextAirs', 'next_airs', 'nextAiring', 'airing', 'whenitairs'])
+    next_airs:      firstOf(data, ['nextAirs', 'next_airs', 'nextAiring', 'airing', 'whenitairs']),
+    favorites:      firstOf(data, ['favorites', 'favorite'])
   };
 }
 
