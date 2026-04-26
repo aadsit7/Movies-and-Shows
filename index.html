@@ -184,6 +184,25 @@
       color: var(--accent);
     }
 
+    /* ── Back button (iOS-style, shown in Search sub-header) ── */
+    .back-btn {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      background: none;
+      border: none;
+      color: var(--accent);
+      font-size: 17px;
+      font-weight: 600;
+      padding: 0;
+      min-height: 44px;
+      min-width: 60px;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      letter-spacing: -.2px;
+    }
+    .back-btn:active { opacity: .6; }
+
     /* ── Sub-header row (search + update-all) ─────────────── */
     .sub-header-row {
       display: flex;
@@ -1359,7 +1378,7 @@
    CONSTANTS & CONFIG
 ════════════════════════════════════════════════════════════ */
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzcXxFOz7wJGP4Zidt9HkFhhAMVUSivV6NLL8noP_Slkb0vFcwIFxB220plyVUlL7ymfw/exec';
-const APP_VERSION     = '1.3.1';
+const APP_VERSION     = '1.3.2';
 
 /* ── Streaming platform brand colours ───────────────────── */
 const PLATFORM_COLORS = {
@@ -1404,7 +1423,8 @@ const S = {
   shows:        [],
   livetv:       [],
   tab:          'shows',   // internal key: 'shows' | 'upcoming' | 'search' | 'settings'
-  libraryType:  'all',     // 'all' | 'movies' | 'shows' | 'livetv'
+  libraryType:  'upcoming', // 'upcoming' | 'all' | 'movies' | 'shows' | 'livetv'
+  prevPublicTab: 'guide',   // tab to return to when closing Search
   filter:       { shows: '', upcoming: '', schedule: '', settings: '' },
   connStatus:   null,      // 'ok' | 'err' | null
   lastSynced:   null,
@@ -1640,19 +1660,35 @@ function relativeWhen(date) {
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
-/* Parse a date value (ISO string, date-only string, or Date) and return a
-   friendly label: "Today", "Tomorrow", day name, "Apr 26", or the original
-   string if it cannot be parsed as a date. */
+/* Parse a date value (ISO string or date-only string) and return a TV-guide
+   style label: "Tonight · 7:30pm", "Tomorrow · 4:05pm", "Sun · 1pm",
+   "Sun Apr 27 · 4:05pm", or the original string if it cannot be parsed. */
 function friendlyDate(value) {
   if (!value) return value;
   const s = String(value).trim();
-  // If it already looks like a human label (no digits or very short), keep it
   const d = new Date(s);
-  if (isNaN(d.getTime())) return s; // unparseable — return as-is
-  const label = relativeWhen(d);
-  if (label) return label;
-  // relativeWhen returns null for past dates; show the date anyway
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  if (isNaN(d.getTime())) return s; // unparseable — show as-is
+
+  const now = new Date();
+  const startOfToday  = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfTarget = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diffDays = Math.round((startOfTarget - startOfToday) / 86400000);
+
+  const h = d.getHours(), m = d.getMinutes();
+  const hasTime = h > 0 || m > 0;
+  const timeStr = hasTime
+    ? `${h % 12 || 12}${m > 0 ? ':' + String(m).padStart(2,'0') : ''}${h >= 12 ? 'pm' : 'am'}`
+    : '';
+
+  let dayStr;
+  if      (diffDays === 0) dayStr = (hasTime && h >= 17) ? 'Tonight' : 'Today';
+  else if (diffDays === 1) dayStr = 'Tomorrow';
+  else if (diffDays > 1 && diffDays < 7)
+    dayStr = d.toLocaleDateString([], { weekday: 'short' });
+  else
+    dayStr = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+
+  return timeStr ? `${dayStr} · ${timeStr}` : dayStr;
 }
 
 /* For recurring shows like "Tuesdays at 9pm", extract a day-of-week label. */
@@ -1779,6 +1815,11 @@ async function deleteRow(tab, rowIndex) {
 const TAB_ALIAS = { guide: 'shows', schedule: 'upcoming' };
 
 function switchTab(publicTab) {
+  // Remember where user came from so Search can offer a back button
+  if (publicTab === 'search' && S.tab !== 'search') {
+    const curInternal = S.tab;
+    S.prevPublicTab = Object.keys(TAB_ALIAS).find(k => TAB_ALIAS[k] === curInternal) || curInternal;
+  }
   const tab = TAB_ALIAS[publicTab] || publicTab; // resolve alias → internal key
   S.tab = tab;
 
@@ -1860,8 +1901,21 @@ function renderSubHeader(tab) {
     return;
   }
 
+  if (tab === 'search') {
+    const backTo    = S.prevPublicTab || 'guide';
+    const backLabel = { guide: 'Guide', schedule: 'Schedule', settings: 'Settings' }[backTo] || 'Back';
+    el.innerHTML = `
+      <div class="sub-header-row" style="align-items:center">
+        <button class="back-btn" onclick="switchTab('${backTo}')">‹ ${esc(backLabel)}</button>
+        <span style="flex:1;text-align:center;font-weight:700;font-size:15px;color:var(--text-1)">Search</span>
+        <span style="width:60px"></span>
+      </div>`;
+    return;
+  }
+
   if (tab === 'shows') {
     const chips = [
+      { key: 'upcoming', label: '⏰ Upcoming' },
       { key: 'all',    label: 'All' },
       { key: 'movies', label: '🎬 Movies' },
       { key: 'shows',  label: '📺 Shows' },
@@ -1997,9 +2051,19 @@ function renderLibrary() {
   const cutoff   = Date.now() - 36 * 3600 * 1000;
 
   // Filter by type chip
-  let entries = type === 'all'
-    ? searchIndex.slice()
-    : searchIndex.filter(e => e.tab === type);
+  let entries;
+  if (type === 'upcoming') {
+    // Only shows + live TV with a date coming up (within last 36h or future)
+    entries = searchIndex.filter(e =>
+      (e.tab === 'shows' || e.tab === 'livetv') &&
+      e.airsDate && e.airsDate.getTime() > cutoff
+    );
+    if (!words.length) entries.sort((a, b) => a.airsDate - b.airsDate);
+  } else if (type === 'all') {
+    entries = searchIndex.slice();
+  } else {
+    entries = searchIndex.filter(e => e.tab === type);
+  }
 
   if (words.length) {
     // Multi-word AND: every word must appear somewhere in the haystack
@@ -2015,7 +2079,7 @@ function renderLibrary() {
       if (aTitle !== bTitle) return aTitle ? -1 : 1;
       return 0;
     });
-  } else {
+  } else if (type !== 'upcoming') {
     // No query: shows/livetv with upcoming dates first, sorted by date; movies after
     entries.sort((a, b) => {
       if (a.tab === 'movies' && b.tab !== 'movies') return 1;
@@ -2038,18 +2102,27 @@ function renderLibrary() {
     return true;
   });
 
-  renderUpcomingLibrary();
+  // Upcoming rail only makes sense when not already in Upcoming chip mode
+  if (type === 'upcoming') {
+    const el2 = document.getElementById('upcoming-library');
+    if (el2) el2.innerHTML = '';
+  } else {
+    renderUpcomingLibrary();
+  }
 
   const grid = document.getElementById('grid-library');
   if (!grid) return;
 
   if (!entries.length) {
+    const emptyMsg = rawQuery
+      ? `No results for &ldquo;${esc(rawQuery)}&rdquo;`
+      : type === 'upcoming'
+        ? 'No upcoming dates yet — tap 🔄 on a show or Live TV card to fetch air times.'
+        : 'Nothing here yet — tap <strong>+</strong> to add!';
     grid.innerHTML = `
       <div class="empty-state">
-        <div class="big-icon">🎬</div>
-        <p>${rawQuery
-          ? `No results for &ldquo;${esc(rawQuery)}&rdquo;`
-          : 'Nothing here yet — tap <strong>+</strong> to add!'}</p>
+        <div class="big-icon">${type === 'upcoming' ? '📅' : '🎬'}</div>
+        <p>${emptyMsg}</p>
       </div>`;
     return;
   }
