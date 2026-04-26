@@ -2845,13 +2845,22 @@ function collectThisWeek() {
       if (tab === 'shows' && Array.isArray(raw.episodes) && raw.episodes.length) {
         /* Show every upcoming episode within the next 7 days */
         raw.episodes.forEach(ep => {
-          if (!ep.air_date) return;
-          const date = parseAiringDate(ep.air_date);
-          if (!date) return;
+          if (!ep.air_date && !ep.airstamp) return;
+          /* Use airstamp (UTC ISO) when available so the time is correct in the
+             user's local timezone; fall back to date-only parsing otherwise. */
+          let date;
+          const stamp = ep.airstamp ? String(ep.airstamp) : '';
+          if (stamp) {
+            date = new Date(stamp);
+            if (isNaN(date.getTime())) date = parseAiringDate(ep.air_date);
+          } else {
+            date = parseAiringDate(ep.air_date);
+          }
+          if (!date || isNaN(date.getTime())) return;
           const s = ep.season  ? 'S' + String(ep.season).padStart(2, '0') : '';
           const e = ep.episode ? 'E' + String(ep.episode).padStart(2, '0') : '';
           const t = ep.episode_title ? ' ' + ep.episode_title : '';
-          pushEntry(raw, idx, ep.air_date, date, tab, (s + e + t).trim() || null, ep.network || null);
+          pushEntry(raw, idx, ep.air_date || stamp, date, tab, (s + e + t).trim() || null, ep.network || null);
         });
       } else if (tab === 'livetv' && Array.isArray(raw.games) && raw.games.length) {
         /* Show every upcoming game within the next 7 days */
