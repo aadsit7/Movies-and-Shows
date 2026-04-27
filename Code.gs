@@ -110,7 +110,7 @@ function settingEnabled(settings, key) {
 
 /* ── Cache ───────────────────────────────────────────────── */
 var CACHE_KEY = 'allMedia_v1';
-var CACHE_TTL = 300; // seconds (5 minutes)
+var CACHE_TTL = 1800; // seconds (30 minutes)
 
 function invalidateCache() {
   try { CacheService.getScriptCache().remove(CACHE_KEY); } catch (_) {}
@@ -234,7 +234,7 @@ function handleSearch(query, searchType) {
         var us = body.results && body.results.US;
         if (us && us.flatrate && us.flatrate.length) provMap[tag.id] = us.flatrate[0].provider_name;
       } else if (tag.src === 'ev') {
-        evMap[tag.id] = (body.events || []).slice(0, 5);
+        evMap[tag.id] = (body.events || []).slice(0, 15);
       }
     } catch (_) {}
   });
@@ -571,8 +571,8 @@ function attachSchedule(items, itemKey, groups, writer) {
 }
 
 /* Pick the earliest row whose date column (parsed as YYYY-MM-DD) is today
-   or later. Falls back to the very first row when nothing parses, so a
-   detail card always has something to show. */
+   or later. Returns null when every row is in the past so callers never
+   surface stale "last week's game" data on a card. */
 function pickUpcoming(rows, dateField) {
   if (!rows || !rows.length) return null;
   var today = new Date();
@@ -588,7 +588,7 @@ function pickUpcoming(rows, dateField) {
     if (d.getTime() < today.getTime()) continue;
     if (d.getTime() < bestTime) { best = rows[i]; bestTime = d.getTime(); }
   }
-  return best || rows[0];
+  return best;
 }
 
 /* ── Ensure columns exist ────────────────────────────────── */
@@ -887,11 +887,28 @@ function writeScheduleRows(sheetName, fields, joinKey, joinValue, rows) {
   var keyIdx  = headers.indexOf(joinKey);
   var matchLc = String(joinValue).toLowerCase().trim();
 
-  /* Delete existing rows for this join value (bottom-up to keep indices valid) */
+  /* Delete existing rows for the current join value AND prune any rows from
+     other channels/titles that are more than 30 days in the past (Schedules
+     sheet only). Single bottom-up pass keeps row indices valid throughout. */
+  var cutoffMs = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  var dateColIdx = headers.indexOf('date');
   if (keyIdx !== -1) {
     for (var i = data.length - 1; i >= 1; i--) {
-      if (String(data[i][keyIdx]).toLowerCase().trim() === matchLc) {
+      var rowKey = String(data[i][keyIdx]).toLowerCase().trim();
+      if (rowKey === matchLc) {
         sheet.deleteRow(i + 1);
+        continue;
+      }
+      /* Only auto-prune stale rows on the Schedules sheet (not episode lists) */
+      if (sheetName === SCHEDULES_SHEET && dateColIdx !== -1) {
+        var rawDate = String(data[i][dateColIdx] || '').trim();
+        var dm = rawDate.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+        if (dm) {
+          var rowDate = new Date(+dm[1], +dm[2] - 1, +dm[3]);
+          if (!isNaN(rowDate.getTime()) && rowDate.getTime() < cutoffMs) {
+            sheet.deleteRow(i + 1);
+          }
+        }
       }
     }
   }
@@ -959,9 +976,9 @@ function handleClaudeSearch(query, sheetName, clientDatetime) {
     '{"type":"Movie","title":"","year":"<4-digit year>","genre":"<primary genre>","rating":"<MPAA rating e.g. PG-13>","description":"<1-2 sentence plot summary>","director":"","cast":"<comma-separated top 3 actors>","streamingOn":"<platform name>","imdbScore":"<e.g. 8.2>","tone":"<e.g. Action, Comedy, Drama, Thriller>"}\n\n' +
     'For a TV Show use exactly these keys (and include an "episodes" array of the next 5 upcoming or most recent episodes when known):\n' +
     '{"type":"Show","title":"","year":"<year show started>","genre":"<primary genre>","rating":"<TV rating e.g. TV-MA>","description":"<1-2 sentence premise>","network":"<broadcast network or streaming service>","seasons":"<number>","latestEpisode":"<S##E## Title if known>","status":"<Returning | Ended | Cancelled | On Hiatus>","nextAirs":"<YYYY-MM-DD HH:MM TZ or descriptive e.g. \'Tuesdays 9PM ET on NBC\'>","cast":"<comma-separated top 3 actors>","streamingOn":"<streaming platform if different from network>","imdbScore":"<e.g. 8.2>","tone":"<e.g. Drama, Comedy, Thriller>","episodes":[{"season":"5","episode":"3","episode_title":"","air_date":"YYYY-MM-DD","network":""}]}\n\n' +
-    'For Live TV / Sports channel use exactly these keys (and include a "games" array of the next 5 games when known):\n' +
-    '{"type":"LiveTV","channel":"<channel or team name>","network":"<broadcast network>","league":"<e.g. NFL, NBA, EPL>","genre":"<Sports | News | Entertainment>","description":"<brief description>","streamingOn":"<streaming platform>","nextGame":"<YYYY-MM-DD HH:MM TZ or descriptive>","tvChannel":"<cable/satellite channel name>","games":[{"date":"YYYY-MM-DD","time":"7:10 PM PT","opponent":"","tv_channel":""}]}\n\n' +
-    'Rules: real data only; leave a field empty string if truly unknown; dates MUST be in YYYY-MM-DD format when an exact date is known. Return at most 5 episodes / games. Omit the array (or return []) if you cannot find scheduled dates.';
+    'For Live TV / Sports channel use exactly these keys (and include a "games" array of the next 15 games when known):\n' +
+    '{"type":"LiveTV","channel":"<channel or team name>","network":"<broadcast network>","league":"<e.g. NFL, NBA, EPL>","genre":"<Sports | News | Entertainment>","description":"<brief description>","streamingOn":"<streaming platform>","nextGame":"<YYYY-MM-DD HH:MM PT or descriptive>","tvChannel":"<cable/satellite channel name>","games":[{"date":"YYYY-MM-DD","time":"7:10 PM PDT","opponent":"","tv_channel":""}]}\n\n' +
+    'Rules: real data only; leave a field empty string if truly unknown; dates MUST be in YYYY-MM-DD format when an exact date is known. Game times MUST be in Pacific Time (e.g. "7:10 PM PDT" or "1:05 PM PST"). Return at most 15 games and 5 episodes. Omit the array (or return []) if you cannot find scheduled dates.';
 
   var payload = {
     model:      ANTHROPIC_MODEL,
