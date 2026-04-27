@@ -1539,9 +1539,198 @@
     .confidence-high   { background: #1f8a4d; color: #fff; }
     .confidence-medium { background: #b07a16; color: #fff; }
     .confidence-low    { background: #555;    color: #fff; }
+
+    /* ── Profile Selector Screen ────────────────────────────── */
+    #profile-selector {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: #0d1117;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .profile-selector-inner {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 44px;
+      padding: 32px 24px;
+    }
+    .profile-selector-title {
+      font-size: 28px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: 0.2px;
+      text-align: center;
+    }
+    .profile-cards-row {
+      display: flex;
+      gap: 36px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .profile-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 18px;
+      cursor: pointer;
+      padding: 22px 26px;
+      border-radius: 16px;
+      border: 2px solid transparent;
+      transition: background 0.2s, border-color 0.2s, transform 0.15s;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    .profile-card:hover {
+      background: rgba(255,255,255,.07);
+      border-color: rgba(255,255,255,.14);
+    }
+    .profile-card:active { transform: scale(0.95); }
+    .profile-avatar {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 52px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.45);
+    }
+    .profile-avatar-adsit {
+      background: linear-gradient(135deg, #0096cc 0%, #0055a0 100%);
+      animation: avatar-float 3s ease-in-out infinite;
+    }
+    .profile-avatar-popnana {
+      background: linear-gradient(135deg, #e8607e 0%, #a02055 100%);
+      animation: avatar-heartbeat 1.8s ease-in-out infinite;
+    }
+    .profile-card-name {
+      font-size: 19px;
+      font-weight: 600;
+      color: #fff;
+      text-align: center;
+      line-height: 1.2;
+    }
+    @keyframes avatar-float {
+      0%,100% { transform: translateY(0) rotate(0deg); }
+      50%      { transform: translateY(-10px) rotate(-3deg); }
+    }
+    @keyframes avatar-heartbeat {
+      0%,100% { transform: scale(1); }
+      15%     { transform: scale(1.16); }
+      30%     { transform: scale(1); }
+      45%     { transform: scale(1.10); }
+      60%     { transform: scale(1); }
+    }
+    .profile-selector-fade-out {
+      animation: ps-fade-out 0.35s ease forwards;
+    }
+    @keyframes ps-fade-out {
+      from { opacity: 1; transform: scale(1); }
+      to   { opacity: 0; transform: scale(1.05); }
+    }
+
+    /* ── Profile indicator in side menu ────────────────────── */
+    .side-menu-profile {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 18px 12px;
+      border-top: 1px solid var(--border);
+    }
+    .side-menu-profile-dot {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 17px;
+      flex-shrink: 0;
+    }
+    .side-menu-profile-dot-adsit   { background: linear-gradient(135deg,#0096cc,#0055a0); }
+    .side-menu-profile-dot-popnana { background: linear-gradient(135deg,#e8607e,#a02055); }
+    .side-menu-profile-info { flex: 1; min-width: 0; }
+    .side-menu-profile-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .side-menu-profile-switch {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+      cursor: pointer;
+      background: none;
+      border: none;
+      padding: 4px 0;
+      font-family: inherit;
+      -webkit-tap-highlight-color: transparent;
+      flex-shrink: 0;
+    }
+
+    /* ── Switch-profile card in Settings tab ───────────────── */
+    .settings-profile-card {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 16px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin: 14px 14px 0;
+    }
+    .settings-profile-avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      flex-shrink: 0;
+    }
+    .settings-profile-avatar-adsit   { background: linear-gradient(135deg,#0096cc,#0055a0); }
+    .settings-profile-avatar-popnana { background: linear-gradient(135deg,#e8607e,#a02055); }
+    .settings-profile-info { flex: 1; min-width: 0; }
+    .settings-profile-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      color: var(--text-3);
+      margin-bottom: 2px;
+    }
+    .settings-profile-name {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text);
+    }
   </style>
 </head>
 <body>
+
+<!-- Profile selector screen (shown before app until a profile is chosen) -->
+<div id="profile-selector">
+  <div class="profile-selector-inner">
+    <h2 class="profile-selector-title">Choose a Profile</h2>
+    <div class="profile-cards-row">
+      <div class="profile-card" onclick="selectProfile('adsit')">
+        <div class="profile-avatar profile-avatar-adsit">🎬</div>
+        <span class="profile-card-name">Adsit Family</span>
+      </div>
+      <div class="profile-card" onclick="selectProfile('popnana')">
+        <div class="profile-avatar profile-avatar-popnana">⚾</div>
+        <span class="profile-card-name">Pop Pop &amp; Nana</span>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- ═══════════════════════════════════════════════════════════
      APP SHELL
@@ -1681,6 +1870,10 @@ function platformStyle(name) {
 
 /* ── App state ───────────────────────────────────────────── */
 const S = {
+  profile:   null,     // 'adsit' | 'popnana' — active profile
+  allMovies: [],       // raw unfiltered data from sheet
+  allShows:  [],
+  allLivetv: [],
   movies:       [],
   shows:        [],
   livetv:       [],
@@ -1709,6 +1902,56 @@ const S = {
   },
 };
 
+/* ── Profiles ────────────────────────────────────────────── */
+const PROFILES = {
+  adsit:   { id: 'adsit',   name: 'Adsit Family',  icon: '🎬', dotClass: 'side-menu-profile-dot-adsit',   avatarClass: 'settings-profile-avatar-adsit'   },
+  popnana: { id: 'popnana', name: 'Pop Pop & Nana', icon: '⚾', dotClass: 'side-menu-profile-dot-popnana', avatarClass: 'settings-profile-avatar-popnana' },
+};
+const LS_PROFILE_KEY = 'fmtProfile';
+
+/* Filter S.allMovies/Shows/Livetv into S.movies/shows/livetv based on active profile */
+function applyProfileFilter() {
+  if (S.profile !== 'popnana') {
+    S.movies = S.allMovies;
+    S.shows  = S.allShows;
+    S.livetv = S.allLivetv;
+  } else {
+    S.movies = [];
+    S.shows  = [];
+    S.livetv = S.allLivetv.filter(item => {
+      const name = (item.favorite_team_or_channel || item.title || item.team || '').toLowerCase();
+      return name.includes('seahawk') || name.includes('mariner');
+    });
+  }
+  _indexDirty = true;
+}
+
+function selectProfile(id) {
+  if (!PROFILES[id]) return;
+  S.profile = id;
+  localStorage.setItem(LS_PROFILE_KEY, id);
+  const selector = document.getElementById('profile-selector');
+  if (selector) {
+    selector.classList.add('profile-selector-fade-out');
+    setTimeout(() => { selector.style.display = 'none'; }, 360);
+  }
+  applyProfileFilter();
+  renderLibrary();
+  renderScheduleTab();
+  renderSideMenu();
+}
+
+function switchProfile() {
+  localStorage.removeItem(LS_PROFILE_KEY);
+  S.profile = null;
+  closeSideMenu();
+  const selector = document.getElementById('profile-selector');
+  if (selector) {
+    selector.style.display = '';
+    selector.classList.remove('profile-selector-fade-out');
+  }
+}
+
 /* ── Search index (rebuilt on data change, reused on every keystroke) ── */
 let searchIndex   = [];  // [{raw, tab, idx, titleLc, airsDate, haystack}]
 let _indexDirty   = true;
@@ -1725,9 +1968,9 @@ function saveCache() {
   try {
     localStorage.setItem(LS_CACHE_KEY, JSON.stringify({
       v:      CACHE_SCHEMA_V,
-      movies: S.movies,
-      shows:  S.shows,
-      livetv: S.livetv,
+      movies: S.allMovies,
+      shows:  S.allShows,
+      livetv: S.allLivetv,
       at:     Date.now()
     }));
   } catch (_) {}
@@ -1740,12 +1983,12 @@ function restoreCache() {
     const d = JSON.parse(raw);
     /* Reject caches written by an older schema version */
     if (!d || d.v !== CACHE_SCHEMA_V || !Array.isArray(d.shows)) return false;
-    S.movies     = d.movies || [];
-    S.shows      = d.shows  || [];
-    S.livetv     = d.livetv || [];
+    S.allMovies  = d.movies || [];
+    S.allShows   = d.shows  || [];
+    S.allLivetv  = d.livetv || [];
     S.lastSynced = d.at ? new Date(d.at) : null;
     S.connStatus = 'ok';
-    _indexDirty  = true;
+    applyProfileFilter();
     return true;
   } catch (_) {
     return false;
@@ -2322,11 +2565,22 @@ function renderSideMenu() {
       <span>${item.label}</span>
     </button>
   `).join('');
+  const p = S.profile ? PROFILES[S.profile] : null;
+  const profileHtml = p ? `
+    <div class="side-menu-profile">
+      <div class="side-menu-profile-dot ${p.dotClass}">${p.icon}</div>
+      <div class="side-menu-profile-info">
+        <div class="side-menu-profile-name">${esc(p.name)}</div>
+      </div>
+      <button class="side-menu-profile-switch" onclick="switchProfile()">Switch</button>
+    </div>` : '';
+
   el.innerHTML = `
     <div class="side-menu-section">${navHtml}</div>
     <div class="side-menu-divider" role="separator"></div>
     <div class="side-menu-section-label">Library</div>
     <div class="side-menu-section">${libHtml}</div>
+    ${profileHtml}
   `;
 }
 
@@ -2542,12 +2796,12 @@ function loadAllData({ force = false } = {}) {
     .then(text => {
       const data = JSON.parse(text);
       if (data.error) throw new Error(data.error);
-      S.movies = data.movies || [];
-      S.shows  = data.shows  || [];
-      S.livetv = data.liveTV || [];
+      S.allMovies = data.movies || [];
+      S.allShows  = data.shows  || [];
+      S.allLivetv = data.liveTV || [];
       S.lastSynced = new Date();
       S.connStatus = 'ok';
-      _indexDirty = true;
+      applyProfileFilter();
       saveCache();
       renderLibrary();
       renderScheduleTab();
@@ -2577,21 +2831,21 @@ function loadAllData({ force = false } = {}) {
 }
 
 function renderMovies(items) {
-  S.movies = items;
-  _indexDirty = true;
+  S.allMovies = items;
+  applyProfileFilter();
   renderLibrary();
 }
 
 function renderShows(items) {
-  S.shows = items;
-  _indexDirty = true;
+  S.allShows = items;
+  applyProfileFilter();
   renderLibrary();
   renderScheduleTab();
 }
 
 function renderLiveTV(items) {
-  S.livetv = items;
-  _indexDirty = true;
+  S.allLivetv = items;
+  applyProfileFilter();
   renderLibrary();
   renderScheduleTab();
 }
@@ -2616,12 +2870,12 @@ async function loadTabData(tab) {
   try {
     const data   = await getAllMedia();
     if (data.error) throw new Error(data.error);
-    S.movies     = data.Movies  || data.movies  || [];
-    S.shows      = data.Shows   || data.shows   || [];
-    S.livetv     = data.liveTV || [];
+    S.allMovies  = data.Movies  || data.movies  || [];
+    S.allShows   = data.Shows   || data.shows   || [];
+    S.allLivetv  = data.liveTV || [];
     S.lastSynced = new Date();
     S.connStatus = 'ok';
-    _indexDirty  = true;
+    applyProfileFilter();
     saveCache();
     if (tab === 'upcoming' || tab === 'schedule') renderScheduleTab();
     else renderLibrary();
@@ -4129,8 +4383,21 @@ function renderSettings() {
   const connLabel = S.connStatus === 'ok' ? 'Connected' : S.connStatus === 'err' ? 'Error' : 'Unknown';
   const total     = S.movies.length + S.shows.length + S.livetv.length;
 
+  const curProfile = S.profile ? PROFILES[S.profile] : null;
+  const profileCardHtml = curProfile ? `
+    <div class="settings-profile-card">
+      <div class="settings-profile-avatar ${curProfile.avatarClass}">${curProfile.icon}</div>
+      <div class="settings-profile-info">
+        <div class="settings-profile-label">Active Profile</div>
+        <div class="settings-profile-name">${esc(curProfile.name)}</div>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="switchProfile()">Switch Profile</button>
+    </div>` : '';
+
   document.getElementById('settings-body').innerHTML = `
     <div class="settings-wrap">
+
+      ${profileCardHtml}
 
       <!-- Search results area (populated by sub-header search) -->
       <div id="result-settings"></div>
@@ -4354,12 +4621,12 @@ async function silentReload() {
   try {
     const data   = await getAllMedia();
     if (data.error) throw new Error(data.error);
-    S.movies     = data.movies || data.Movies || [];
-    S.shows      = data.shows  || data.Shows  || [];
-    S.livetv     = data.liveTV || [];
+    S.allMovies  = data.movies || data.Movies || [];
+    S.allShows   = data.shows  || data.Shows  || [];
+    S.allLivetv  = data.liveTV || [];
     S.lastSynced = new Date();
     S.connStatus = 'ok';
-    _indexDirty = true;
+    applyProfileFilter();
     saveCache();
     renderLibrary();
     renderScheduleTab();
@@ -4872,6 +5139,14 @@ async function dislikeRecommendedResult(idx) {
    INIT
 ════════════════════════════════════════════════════════════ */
 (function init() {
+  // Restore the stored profile (if any) and hide the selector overlay
+  const storedProfile = localStorage.getItem(LS_PROFILE_KEY);
+  if (storedProfile && PROFILES[storedProfile]) {
+    S.profile = storedProfile;
+    const selector = document.getElementById('profile-selector');
+    if (selector) selector.style.display = 'none';
+  }
+
   // Default to the Schedule (📅) view so the home screen is "what's on today
   // and the next 7 days," with currently-airing items at the top of Today.
   S.tab = 'upcoming';
