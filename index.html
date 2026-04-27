@@ -5212,6 +5212,7 @@ async function doSearch() {
     console.error('doSearch:', err);
     let msg = err.message || 'please try again';
     if (msg.toLowerCase().includes('tmdb_api_key')) msg = 'Movie search requires a TMDB API key — set TMDB_API_KEY in Apps Script Script Properties.';
+    if (msg.toLowerCase().includes('bandwidth quota') || msg.toLowerCase().includes('quota exceeded')) msg = 'Too many requests today — search quota reached. Try again tomorrow.';
     if (resultEl) resultEl.innerHTML = `<p style="color:var(--error);padding:16px 0;font-size:14px">Search failed — ${esc(msg)}</p>`;
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Search'; }
