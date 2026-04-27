@@ -2199,22 +2199,24 @@ function relativeWhen(date) {
 /* Format a pre-parsed Date object as a human-friendly schedule label. */
 function friendlyDateObj(d) {
   if (!d || isNaN(d.getTime())) return '';
-  const now = new Date();
-  const startOfToday  = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startOfTarget = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const pt  = ptParts(d);
+  const npt = ptParts(new Date());
+  const startOfToday  = new Date(npt.year, npt.month, npt.day);
+  const startOfTarget = new Date(pt.year,  pt.month,  pt.day);
   const diffDays = Math.round((startOfTarget - startOfToday) / 86400000);
-  const h = d.getHours(), m = d.getMinutes();
+  const h = pt.hour, m = pt.minute;
   const hasTime = h > 0 || m > 0;
+  const tz = ptTzLabel(d);
   const timeStr = hasTime
-    ? `${h % 12 || 12}${m > 0 ? ':' + String(m).padStart(2,'0') : ''}${h >= 12 ? 'pm' : 'am'}`
+    ? `${h % 12 || 12}${m > 0 ? ':' + String(m).padStart(2,'0') : ''}${h >= 12 ? 'pm' : 'am'} ${tz}`
     : '';
   let dayStr;
   if      (diffDays === 0) dayStr = (hasTime && h >= 17) ? 'Tonight' : 'Today';
   else if (diffDays === 1) dayStr = 'Tomorrow';
   else if (diffDays > 1 && diffDays < 7)
-    dayStr = d.toLocaleDateString([], { weekday: 'short' });
+    dayStr = d.toLocaleDateString('en-US', { timeZone: PACIFIC_TZ, weekday: 'short' });
   else
-    dayStr = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+    dayStr = d.toLocaleDateString('en-US', { timeZone: PACIFIC_TZ, weekday: 'short', month: 'short', day: 'numeric' });
   return timeStr ? `${dayStr} · ${timeStr}` : dayStr;
 }
 
@@ -2226,6 +2228,29 @@ function friendlyDate(value) {
   const d = parseAiringDate(s) || new Date(s);
   if (isNaN(d.getTime())) return s;
   return friendlyDateObj(d) || s;
+}
+
+/* ── Pacific-time display helpers ────────────────────────────
+   All times are displayed in America/Los_Angeles so the app always
+   shows Seattle-local times regardless of the device's own timezone. */
+const PACIFIC_TZ = 'America/Los_Angeles';
+
+function ptParts(date) {
+  const p = {};
+  new Intl.DateTimeFormat('en-US', {
+    timeZone: PACIFIC_TZ,
+    year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: false
+  }).formatToParts(date).forEach(({ type, value }) => { p[type] = value; });
+  const h = +p.hour;
+  return { year: +p.year, month: +p.month - 1, day: +p.day,
+           hour: h === 24 ? 0 : h, minute: +p.minute };
+}
+
+function ptTzLabel(date) {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: PACIFIC_TZ, timeZoneName: 'short'
+  }).formatToParts(date).find(p => p.type === 'timeZoneName')?.value || 'PT';
 }
 
 /* For recurring shows like "Tuesdays at 9pm", extract a day-of-week label. */
@@ -3064,10 +3089,11 @@ function renderNextUpHero(days) {
 
     let timeStr = '';
     if (date) {
-      const h = date.getHours(), m = date.getMinutes();
+      const pt = ptParts(date);
+      const h = pt.hour, m = pt.minute;
       if (h > 0 || m > 0) {
         const ampm = h >= 12 ? 'pm' : 'am';
-        timeStr = `${h % 12 || 12}${m > 0 ? ':' + String(m).padStart(2, '0') : ''}${ampm}`;
+        timeStr = `${h % 12 || 12}${m > 0 ? ':' + String(m).padStart(2, '0') : ''}${ampm} ${ptTzLabel(date)}`;
       }
     }
 
@@ -3094,14 +3120,16 @@ function isActiveShow(raw) {
 
 function collectThisWeek() {
   const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const days = {};     // diffDays (0-6) → array of entries
+  const nowPt = ptParts(now);
+  const startOfToday = new Date(nowPt.year, nowPt.month, nowPt.day);
+  const days = {};     // diffDays (0-13) → array of entries
 
-  /* Push one entry per episode/game that falls within the next 7 days.
+  /* Push one entry per episode/game that falls within the next 14 days.
      label  = episode label ("S16E11 Title") or opponent ("vs Twins")
      network = per-entry channel override (game-specific TV channel) */
   function pushEntry(raw, idx, text, date, tab, label, network) {
-    const startOfTarget = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const pt = ptParts(date);
+    const startOfTarget = new Date(pt.year, pt.month, pt.day);
     const diff = Math.round((startOfTarget - startOfToday) / 86400000);
     if (diff < 0 || diff >= 14) return;
     if (!days[diff]) days[diff] = [];
@@ -3247,17 +3275,20 @@ function renderScheduleItem(entry) {
   const SMONS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   let whenStr, timeStr = '';
   if (date) {
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const startOfDate  = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const now  = new Date();
+    const npt  = ptParts(now);
+    const pt   = ptParts(date);
+    const startOfToday = new Date(npt.year, npt.month, npt.day);
+    const startOfDate  = new Date(pt.year,  pt.month,  pt.day);
     const diff = Math.round((startOfDate - startOfToday) / 86400000);
+    const ptDate = new Date(pt.year, pt.month, pt.day);
     whenStr = diff === 0 ? 'Today'
       : diff === 1 ? 'Tomorrow'
-      : `${SDAYS[date.getDay()]} ${SMONS[date.getMonth()]} ${date.getDate()}`;
-    const h = date.getHours(), m = date.getMinutes();
+      : `${SDAYS[ptDate.getDay()]} ${SMONS[pt.month]} ${pt.day}`;
+    const h = pt.hour, m = pt.minute;
     if (h > 0 || m > 0) {
       const ampm = h >= 12 ? 'pm' : 'am';
-      timeStr = `${h % 12 || 12}${m > 0 ? ':' + String(m).padStart(2, '0') : ''}${ampm}`;
+      timeStr = `${h % 12 || 12}${m > 0 ? ':' + String(m).padStart(2, '0') : ''}${ampm} ${ptTzLabel(date)}`;
     }
   } else {
     whenStr = friendlyDate(text);
@@ -3488,9 +3519,10 @@ function renderScheduleTab() {
   if (!query) html += renderNextUpHero(days);
   // Iterate the next 7 days; nearest date sections appear first automatically.
   // Current-time string for the Today header so the user always sees "now".
-  const nowH = now.getHours(), nowM = now.getMinutes();
+  const nowPtParts = ptParts(now);
+  const nowH = nowPtParts.hour, nowM = nowPtParts.minute;
   const nowAmpm = nowH >= 12 ? 'pm' : 'am';
-  const nowTime = `${nowH % 12 || 12}:${String(nowM).padStart(2,'0')}${nowAmpm}`;
+  const nowTime = `${nowH % 12 || 12}:${String(nowM).padStart(2,'0')}${nowAmpm} ${ptTzLabel(now)}`;
 
   for (let i = 0; i < 14; i++) {
     const allItems = days[i];
