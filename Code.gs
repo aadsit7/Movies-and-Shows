@@ -219,7 +219,14 @@ function handleSearch(query, searchType) {
   });
 
   /* ── Round 2: all secondary enrichment requests in parallel ─ */
-  var r2Resps  = r2Reqs.length ? UrlFetchApp.fetchAll(r2Reqs) : [];
+  var r2Resps;
+  try {
+    r2Resps = r2Reqs.length ? UrlFetchApp.fetchAll(r2Reqs) : [];
+  } catch (quotaErr) {
+    // Apps Script URL-fetch quota exceeded — return primary results without enrichment
+    r2Resps = [];
+    errors.push('Streaming provider data unavailable (quota exceeded).');
+  }
   var todayMs  = new Date().setHours(0, 0, 0, 0);
   var epMap    = {}, provMap = {}, evMap = {};
 
