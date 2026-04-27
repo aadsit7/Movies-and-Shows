@@ -262,8 +262,27 @@ function handleSearch(query, searchType) {
   sportsTeams.forEach(function(team) {
     var events = evMap[team.idTeam] || [];
     var games  = events.map(function(ev) {
-      var opp = ev.strHomeTeam === team.strTeam ? ev.strAwayTeam : ev.strHomeTeam;
-      return { date: ev.dateEvent || '', time: ev.strTime || '', opponent: opp, tv_channel: ev.strTVStation || '' };
+      var opp      = ev.strHomeTeam === team.strTeam ? ev.strAwayTeam : ev.strHomeTeam;
+      var gameDate = ev.dateEvent || '';
+      var gameTime = ev.strTime   || '';
+      /* TheSportsDB returns dateEvent and strTime in UTC.
+         Combine them into a full ISO-8601 UTC timestamp and convert to
+         America/Los_Angeles so stored values match the viewer's local time.
+         A Mariners 7:10 PM PDT home game arrives as "02:10:00+00:00" UTC
+         the next calendar day — without conversion it would show as 2 AM. */
+      if (gameDate && gameTime) {
+        try {
+          var utcStr = gameDate + 'T' + gameTime;
+          // Append Z if there is no timezone indicator at the end already
+          if (!/Z$|[+-]\d{2}:\d{2}$/.test(utcStr)) utcStr += 'Z';
+          var d = new Date(utcStr);
+          if (!isNaN(d.getTime())) {
+            gameDate = Utilities.formatDate(d, 'America/Los_Angeles', 'yyyy-MM-dd');
+            gameTime = Utilities.formatDate(d, 'America/Los_Angeles', 'h:mm a z');
+          }
+        } catch (_) {}
+      }
+      return { date: gameDate, time: gameTime, opponent: opp, tv_channel: ev.strTVStation || '' };
     });
     var next = games.length
       ? (games[0].date + (games[0].time ? ' ' + games[0].time : '') + (games[0].opponent ? ' vs ' + games[0].opponent : '')).trim()
