@@ -1196,6 +1196,10 @@ function handleRecommendForMe(body) {
     if (tone)  parts.push('[tone: ' + tone + ']');
     var rating = p('agerating', 'rating');
     if (rating) parts.push('[' + rating + ']');
+    var imdb = p('imdbscore', 'imdb');
+    if (imdb) parts.push('[imdb: ' + imdb + ']');
+    var fav = p('favorites');
+    if (fav && (fav.toLowerCase() === 'yes' || fav === '1' || fav.toLowerCase() === 'true')) parts.push('[FAVORITE]');
     return parts.join(' ');
   }
 
@@ -1253,11 +1257,12 @@ function handleRecommendForMe(body) {
     'LIVE URGENCY (mark Pass C titles airing within 7 days as URGENT).\n' +
     'Discard anything below 3 points. Rank by score.\n\n' +
     'PHASE 4 — OUTPUT\n' +
-    'Return EXACTLY 2 movies and 2 TV shows (4 total) — the highest-scoring picks across passes A and B. ' +
-    'Skip Pass C unless one of the four picks is naturally a live/limited-series premiere.\n\n' +
+    'Return EXACTLY 3 movies and 3 TV shows (6 total) — the highest-scoring picks across passes A and B. ' +
+    'Skip Pass C unless one of the six picks is naturally a live/limited-series premiere.\n\n' +
     'ACCURACY RULES\n' +
     '- Never fabricate availability. If you cannot confirm where a title streams, set streamingOn to "Check JustWatch".\n' +
     '- Every "whyItFits" must reference 1–2 specific titles from the user\'s own list as comparison anchors.\n' +
+    '- Titles marked [FAVORITE] in the library are loved most — weight them 2× when building the taste fingerprint and use them as primary anchors in whyItFits.\n' +
     '- Do not recommend any title already in the user\'s library (case-insensitive match on title).\n' +
     '- Prefer specificity over volume.\n\n' +
     'Return ONLY a single raw JSON object — no markdown fences, no explanation, no extra text — with this exact shape:\n' +
@@ -1298,11 +1303,12 @@ function handleRecommendForMe(body) {
     '      "whyItFits": "<2-3 sentences citing specific titles from their list>",\n' +
     '      "confidence": "High | Medium | Worth a shot"\n' +
     '    },\n' +
+    '    { "type": "Show", ... },\n' +
     '    { "type": "Show", ... }\n' +
     '  ]\n' +
     '}\n\n' +
-    'Order: 2 movies first, then 2 shows. Use empty string for any field you cannot confirm. ' +
-    'The "results" array MUST contain exactly 4 entries — 2 with type "Movie" and 2 with type "Show".';
+    'Order: 3 movies first, then 3 shows. Use empty string for any field you cannot confirm. ' +
+    'The "results" array MUST contain exactly 6 entries — 3 with type "Movie" and 3 with type "Show".';
 
   var payload = {
     model:      ANTHROPIC_MODEL,
