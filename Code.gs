@@ -360,7 +360,7 @@ function doPost(e) {
     if (action === 'updateRow')         return respondJson(handleUpdateRow(body.sheetName, body.rowIndex, body.rowData));
     if (action === 'deleteRow')         return respondJson(handleDeleteRow(body.sheetName, body.rowIndex));
     if (action === 'claudeSearch')      return respondJson(handleClaudeSearch(body.query, body.sheetName, body.clientDatetime));
-    if (action === 'recommendForMe')    return respondJson(handleRecommendForMe());
+    if (action === 'recommendForMe')    return respondJson(handleRecommendForMe(body));
     if (action === 'dislike')           return respondJson(handleDislike(body.title, body.type));
     if (action === 'removeDuplicates')  return respondJson(removeDuplicatesFromSheet(body.sheetName));
     if (action === 'saveEpisodes')      return respondJson(handleSaveEpisodes(body.title, body.episodes));
@@ -1072,7 +1072,7 @@ function readDislikedTitles() {
   } catch (_) { return []; }
 }
 
-function handleRecommendForMe() {
+function handleRecommendForMe(body) {
   var settings = getSettings();
   if (!settingEnabled(settings, 'search_enabled')) {
     return { error: 'Search is currently disabled. Enable it in the Settings sheet (search_enabled = TRUE).' };
@@ -1083,11 +1083,18 @@ function handleRecommendForMe() {
     return { error: 'Missing ANTHROPIC_API_KEY — set it in Apps Script → Project Settings → Script Properties' };
   }
 
-  /* Read library digest. We use the unified read so we get the same
-     dedupe + projection treatment the front-end sees. */
-  var media = readAllMedia();
-  var movies = (media && media.movies) || [];
-  var shows  = (media && media.shows)  || [];
+  /* Use the profile-filtered library sent by the client when available.
+     This ensures recommendations are scoped to the active profile's content. */
+  var movies, shows;
+  var providedLib = body && body.library;
+  if (providedLib && Array.isArray(providedLib.movies) && Array.isArray(providedLib.shows)) {
+    movies = providedLib.movies;
+    shows  = providedLib.shows;
+  } else {
+    var media = readAllMedia();
+    movies = (media && media.movies) || [];
+    shows  = (media && media.shows)  || [];
+  }
 
   if (movies.length + shows.length < 3) {
     return {

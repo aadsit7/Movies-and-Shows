@@ -5059,7 +5059,10 @@ async function requestRecommendations() {
   renderRecommendedTab();
 
   try {
-    const raw = await apiPost({ action: 'recommendForMe' }, { retries: 1, timeoutMs: 180000 });
+    const raw = await apiPost(
+      { action: 'recommendForMe', library: { movies: S.movies, shows: S.shows } },
+      { retries: 1, timeoutMs: 180000 }
+    );
     if (raw?.error) throw new Error(raw.error);
     R.profile = String(raw?.profile || '');
     R.results = Array.isArray(raw?.results) ? raw.results : [];
