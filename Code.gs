@@ -609,7 +609,7 @@ function handleAddRow(sheetName, rowData) {
     if (liveTitle && hasDuplicate(sheet, 'favorite_team_or_channel', liveTitle, null, liveRow.profile)) {
       return { success: true, duplicate: true };
     }
-    appendByHeaders(sheet, liveRow);
+    var rowIndex = appendByHeaders(sheet, liveRow);
 
   } else {
     /* Movies and Shows both go into Content_Master */
@@ -623,11 +623,11 @@ function handleAddRow(sheetName, rowData) {
     if (titleVal && hasDuplicate(sheet, 'title', titleVal, kind, contentRow.profile)) {
       return { success: true, duplicate: true };
     }
-    appendByHeaders(sheet, contentRow);
+    var rowIndex = appendByHeaders(sheet, contentRow);
   }
 
   invalidateCache();
-  return { success: true };
+  return { success: true, rowIndex: rowIndex };
 }
 
 /* Returns true if the sheet already has a row whose titleHeader column
@@ -1418,6 +1418,7 @@ function appendByHeaders(sheet, rowData) {
   var headers = normalizeHeaders(sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]);
   var row = headers.map(function(h) { return rowData[h] !== undefined ? rowData[h] : ''; });
   sheet.appendRow(row);
+  return sheet.getLastRow(); // row index of the newly appended row
 }
 
 function isLiveTVSheet(name) {

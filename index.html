@@ -4109,37 +4109,42 @@ async function confirmAdd(source) {
   const btn = document.getElementById('add-btn-' + source);
   if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
 
+  const tab = resultTab(parsed);
+
+  // Tag with profile immediately so the optimistic item is filtered correctly.
+  if (S.profile === 'popnana') parsed.profile = 'popnana';
+  parsed.content_type = parsed.content_type || (tab === 'movies' ? 'Movie' : tab === 'shows' ? 'TV Show' : '');
+
+  // Optimistic update — add to raw arrays and re-filter so the item appears
+  // in the library instantly, before the network round trip completes.
+  if (tab === 'movies') S.allMovies.push(parsed);
+  else if (tab === 'shows') S.allShows.push(parsed);
+  else S.allLivetv.push(parsed);
+  applyProfileFilter();
+  renderLibrary();
+  renderScheduleTab();
+
   try {
-    const tab    = resultTab(parsed);
     const result = await addRow(tab, parsed);
 
     if (result && result.duplicate) {
+      // Roll back the optimistic item — it was already there.
+      if (tab === 'movies') S.allMovies = S.allMovies.filter(m => m !== parsed);
+      else if (tab === 'shows') S.allShows = S.allShows.filter(s => s !== parsed);
+      else S.allLivetv = S.allLivetv.filter(l => l !== parsed);
+      applyProfileFilter();
+      renderLibrary();
       if (btn) { btn.disabled = false; btn.textContent = 'Add to Library'; }
       toast('Already in your library!', '');
       return;
     }
 
-    // Optimistic local update so the library refreshes immediately.
-    // Tag the in-memory copy with the same content_type the backend just
-    // wrote, so any code that filters by content_type sees the new row.
-    if (tab === 'movies') {
-      parsed.content_type = parsed.content_type || 'Movie';
-      S.movies.push(parsed);
-    } else if (tab === 'shows') {
-      parsed.content_type = parsed.content_type || 'TV Show';
-      S.shows.push(parsed);
-    } else {
-      S.livetv.push(parsed);
-    }
-    _indexDirty = true;
-    renderLibrary();
-    // show the new item in the schedule straight away (it may have nextAirs)
-    renderScheduleTab();
+    // Stamp the rowIndex returned by the backend so edit/delete work immediately.
+    if (result && result.rowIndex) parsed.rowIndex = result.rowIndex;
 
     if (btn) { btn.textContent = 'Added ✓'; }
     toast(`Added to ${tabLabel(tab)}!`, 'success');
 
-    // show search-again link
     const resultEl = document.getElementById('result-' + source);
     if (resultEl) {
       const link = document.createElement('a');
@@ -4151,11 +4156,13 @@ async function confirmAdd(source) {
 
     if (source === 'sheet') setTimeout(closeSheet, 1600);
 
-    // Reload from the sheet so the new item has the proper rowIndex and
-    // sheet-projected keys. force:true is required because loadAllData's
-    // staleness guard would otherwise skip this for ~5 minutes.
-    loadAllData({ force: true });
   } catch (err) {
+    // Roll back the optimistic item on network/server failure.
+    if (tab === 'movies') S.allMovies = S.allMovies.filter(m => m !== parsed);
+    else if (tab === 'shows') S.allShows = S.allShows.filter(s => s !== parsed);
+    else S.allLivetv = S.allLivetv.filter(l => l !== parsed);
+    applyProfileFilter();
+    renderLibrary();
     console.error('confirmAdd:', err);
     if (btn) { btn.disabled = false; btn.textContent = 'Add to Library'; }
     toast('Failed to add — try again', 'error');
@@ -4330,53 +4337,60 @@ async function confirmSheetAdd(sheetTarget) {
   const btn = document.getElementById('add-library-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
 
-  let response;
+  // Tag with profile and determine which raw array to update.
+  const tagged = S.profile === 'popnana' ? { ...data, profile: 'popnana' } : { ...data };
+  const tab    = resultTab(tagged);
+  tagged.content_type = tagged.content_type || (tab === 'movies' ? 'Movie' : tab === 'shows' ? 'TV Show' : '');
+
+  // Optimistic update — item appears instantly, before the network call.
+  if (tab === 'movies') S.allMovies.push(tagged);
+  else if (tab === 'shows') S.allShows.push(tagged);
+  else S.allLivetv.push(tagged);
+  applyProfileFilter();
+  renderLibrary();
+  renderScheduleTab();
+  closeSheet();
+  toast('Added!', 'success');
+
   try {
-    const taggedData = S.profile === 'popnana' ? { ...data, profile: 'popnana' } : data;
-    const postBody = { action: 'addRow', sheetName: sheetTarget, rowData: taggedData };
-    response = await fetch(APPS_SCRIPT_URL, {
+    const postBody = { action: 'addRow', sheetName: sheetTarget, rowData: tagged };
+    const response = await fetch(APPS_SCRIPT_URL, {
       method:   'POST',
       headers:  { 'Content-Type': 'text/plain;charset=utf-8' },
       body:     JSON.stringify(postBody),
       redirect: 'follow',
     });
-  } catch (netErr) {
-    console.error('confirmSheetAdd network:', netErr);
-    if (btn) { btn.disabled = false; btn.textContent = 'Add to Library'; }
-    toast('Add failed — no internet', 'error');
-    return;
-  }
 
-  if (!response.ok) {
-    if (btn) { btn.disabled = false; btn.textContent = 'Add to Library'; }
-    toast(`Add failed — server error ${response.status}`, 'error');
-    return;
-  }
+    if (!response.ok) throw new Error('HTTP ' + response.status);
 
-  let result;
-  try {
-    result = await response.json();
-  } catch (parseErr) {
-    console.error('confirmSheetAdd parse:', parseErr);
-    if (btn) { btn.disabled = false; btn.textContent = 'Add to Library'; }
-    toast('Add failed — invalid server response', 'error');
-    return;
-  }
-  if (result && result.error) {
-    if (btn) { btn.disabled = false; btn.textContent = 'Add to Library'; }
-    toast(`Add failed — ${result.error}`, 'error');
-    return;
-  }
+    const result = await response.json();
 
-  if (result && result.duplicate) {
-    if (btn) { btn.disabled = false; btn.textContent = 'Add to Library'; }
-    toast('Already in your library!', '');
-    return;
-  }
+    if (result && result.duplicate) {
+      // Roll back — already existed
+      if (tab === 'movies') S.allMovies = S.allMovies.filter(m => m !== tagged);
+      else if (tab === 'shows') S.allShows = S.allShows.filter(s => s !== tagged);
+      else S.allLivetv = S.allLivetv.filter(l => l !== tagged);
+      applyProfileFilter();
+      renderLibrary();
+      toast('Already in your library!', '');
+      return;
+    }
 
-  closeSheet();
-  toast('Added!', 'success');
-  loadAllData({ force: true });
+    if (result && result.error) throw new Error(result.error);
+
+    // Stamp rowIndex so edit/delete work without a reload.
+    if (result && result.rowIndex) tagged.rowIndex = result.rowIndex;
+
+  } catch (err) {
+    // Roll back optimistic item on failure.
+    if (tab === 'movies') S.allMovies = S.allMovies.filter(m => m !== tagged);
+    else if (tab === 'shows') S.allShows = S.allShows.filter(s => s !== tagged);
+    else S.allLivetv = S.allLivetv.filter(l => l !== tagged);
+    applyProfileFilter();
+    renderLibrary();
+    console.error('confirmSheetAdd:', err);
+    toast(`Add failed — ${err.message || 'try again'}`, 'error');
+  }
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -4899,29 +4913,31 @@ async function saveSearchResult(idx) {
   const btn = document.getElementById('save-btn-' + idx);
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
 
+  const tab = resultTab(item);
+
+  // Tag and optimistically add to state before the network call.
+  if (S.profile === 'popnana') item.profile = 'popnana';
+  item.content_type = item.content_type || (tab === 'movies' ? 'Movie' : tab === 'shows' ? 'TV Show' : '');
+  if (tab === 'movies') S.allMovies.push(item);
+  else if (tab === 'shows') S.allShows.push(item);
+  else S.allLivetv.push(item);
+  applyProfileFilter();
+
   try {
-    const tab    = resultTab(item);
     const result = await addRow(tab, item);
 
     if (result?.duplicate) {
+      if (tab === 'movies') S.allMovies = S.allMovies.filter(m => m !== item);
+      else if (tab === 'shows') S.allShows = S.allShows.filter(s => s !== item);
+      else S.allLivetv = S.allLivetv.filter(l => l !== item);
+      applyProfileFilter();
       if (btn) { btn.disabled = false; btn.textContent = 'Already saved ✓'; }
       toast('Already in your library!', '');
       return;
     }
     if (result?.error) throw new Error(result.error);
 
-    // Tag the in-memory copy with the same content_type the backend wrote,
-    // so any code that filters by content_type sees the new row.
-    if (tab === 'movies') {
-      item.content_type = item.content_type || 'Movie';
-      S.movies.push(item);
-    } else if (tab === 'shows') {
-      item.content_type = item.content_type || 'TV Show';
-      S.shows.push(item);
-    } else {
-      S.livetv.push(item);
-    }
-    _indexDirty = true;
+    if (result?.rowIndex) item.rowIndex = result.rowIndex;
 
     if (btn) { btn.textContent = 'Saved ✓'; }
     toast(`"${pick(norm(item), 'title', 'channel')}" added!`, 'success');
@@ -4936,10 +4952,12 @@ async function saveSearchResult(idx) {
       apiPost({ action: 'saveGames', channelId: item.channel || item.title, games: item.games }).catch(() => {});
     }
 
-    // Force a reload so the new item gets its proper rowIndex from the
-    // sheet (loadAllData's staleness guard would otherwise skip this).
-    loadAllData({ force: true });
   } catch (err) {
+    // Roll back optimistic item on failure.
+    if (tab === 'movies') S.allMovies = S.allMovies.filter(m => m !== item);
+    else if (tab === 'shows') S.allShows = S.allShows.filter(s => s !== item);
+    else S.allLivetv = S.allLivetv.filter(l => l !== item);
+    applyProfileFilter();
     if (btn) { btn.disabled = false; btn.textContent = 'Save to Library'; }
     toast('Save failed — ' + (err.message || 'try again'), 'error');
   }
