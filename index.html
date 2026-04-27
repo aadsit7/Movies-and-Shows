@@ -99,6 +99,27 @@
     .header-refresh:active { opacity: .6; }
     .header-refresh.spinning { animation: spin .8s linear infinite; }
 
+    /* ── Initial-load progress bar ─────────────────────────── */
+    #load-progress-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 0%;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent, #0096cc), #00d4ff);
+      z-index: 99999;
+      transition: width 0.35s ease;
+      opacity: 0;
+      pointer-events: none;
+      border-radius: 0 2px 2px 0;
+    }
+    #load-progress-bar.lpb-active { opacity: 1; }
+    #load-progress-bar.lpb-done {
+      width: 100% !important;
+      transition: width 0.2s ease, opacity 0.35s ease 0.15s;
+      opacity: 0;
+    }
+
     /* ── Hamburger menu button + side drawer ──────────────── */
     .header-menu {
       position: absolute;
@@ -1816,6 +1837,9 @@
 </head>
 <body>
 
+<!-- Top progress bar — shown only during the initial data load -->
+<div id="load-progress-bar"></div>
+
 <!-- Profile selector screen (shown before app until a profile is chosen) -->
 <div id="profile-selector">
   <div class="profile-selector-inner">
@@ -1844,7 +1868,7 @@
       <span></span><span></span><span></span>
     </button>
     <h1 class="app-title">Family Media Tracker</h1>
-    <button class="header-refresh" onclick="hardRefresh()" aria-label="Refresh" title="Hard refresh — reload latest version">↻</button>
+    <button class="header-refresh" onclick="hardRefresh()" aria-label="Refresh" title="Refresh current page">↻</button>
   </header>
 
   <!-- Side menu scrim + drawer -->
@@ -2898,12 +2922,20 @@ function renderLibrary() {
 /* ════════════════════════════════════════════════════════════
    DATA LOADING
 ════════════════════════════════════════════════════════════ */
-/* hardRefresh — reloads the page with a cache-busting query parameter so the
-   browser always fetches the latest HTML/JS/CSS deployed to GitHub Pages. */
-function hardRefresh() {
-  const url = new URL(window.location.href);
-  url.searchParams.set('_v', Date.now());
-  window.location.replace(url.toString());
+/* softRefresh — re-fetches data from Google Sheets and re-renders the current
+   tab in place.  The user stays on whatever tab they are on.  On next cold
+   open the app always starts at the Schedule tab (existing init behaviour). */
+async function hardRefresh() {
+  const btn = document.querySelector('.header-refresh');
+  if (btn) btn.classList.add('spinning');
+  try {
+    await loadAllData({ force: true });
+  } catch (err) {
+    console.warn('softRefresh:', err);
+    toast('Refresh failed — check connection', 'error');
+  } finally {
+    if (btn) btn.classList.remove('spinning');
+  }
 }
 
 /* Builds a rich error panel for loadAllData failures.
@@ -2956,6 +2988,32 @@ function buildErrorHtml(err) {
     </div>`;
 }
 
+/* ── Initial-load progress bar helpers ──────────────────── */
+let _lpbTimer = null;
+
+function showLoadProgress() {
+  const bar = document.getElementById('load-progress-bar');
+  if (!bar) return;
+  if (_lpbTimer) { clearInterval(_lpbTimer); _lpbTimer = null; }
+  bar.classList.remove('lpb-done');
+  bar.style.width = '0%';
+  bar.classList.add('lpb-active');
+  let pct = 0;
+  _lpbTimer = setInterval(() => {
+    pct = Math.min(pct + (pct < 50 ? 9 : pct < 75 ? 3 : 0.5), 85);
+    bar.style.width = pct + '%';
+  }, 280);
+}
+
+function hideLoadProgress() {
+  if (_lpbTimer) { clearInterval(_lpbTimer); _lpbTimer = null; }
+  const bar = document.getElementById('load-progress-bar');
+  if (!bar) return;
+  bar.style.width = '100%';
+  bar.classList.add('lpb-done');
+  setTimeout(() => { bar.classList.remove('lpb-active', 'lpb-done'); bar.style.width = '0%'; }, 600);
+}
+
 /* loadAllData — fetches live data from Google Sheets.
    • In-memory staleness guard (60 s, RAM only): skips the network call when
      data was just fetched — prevents hammering Apps Script on rapid tab
@@ -2969,6 +3027,10 @@ function loadAllData({ force = false } = {}) {
 
   /* Return the in-flight promise if one is already running */
   if (_loadInFlight) return _loadInFlight;
+
+  /* Show progress bar only on the very first load (cold open) */
+  const isFirstLoad = !S.lastSynced;
+  if (isFirstLoad) showLoadProgress();
 
   const libGrid = document.getElementById('grid-library');
   if (libGrid && !libGrid.querySelector('.media-card')) {
@@ -3014,7 +3076,10 @@ function loadAllData({ force = false } = {}) {
         schedBody.innerHTML = errHtml;
       }
     })
-    .finally(() => { _loadInFlight = null; });
+    .finally(() => {
+      _loadInFlight = null;
+      if (isFirstLoad) hideLoadProgress();
+    });
 
   return _loadInFlight;
 }
