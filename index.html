@@ -1754,7 +1754,7 @@
       <span></span><span></span><span></span>
     </button>
     <h1 class="app-title">Family Media Tracker</h1>
-    <button class="header-refresh" onclick="loadAllData({ force: true })" aria-label="Refresh" title="Refresh">↻</button>
+    <button class="header-refresh" onclick="hardRefresh()" aria-label="Refresh" title="Hard refresh — reload latest version">↻</button>
   </header>
 
   <!-- Side menu scrim + drawer -->
@@ -2846,6 +2846,18 @@ function renderLibrary() {
 /* ════════════════════════════════════════════════════════════
    DATA LOADING
 ════════════════════════════════════════════════════════════ */
+/* hardRefresh — clears every local cache then reloads the page with a
+   cache-busting query parameter so the browser always fetches the latest
+   version deployed to GitHub Pages rather than serving a stale copy. */
+function hardRefresh() {
+  try { localStorage.removeItem(LS_CACHE_KEY); } catch (_) {}
+  try { localStorage.removeItem(LS_REC_KEY);   } catch (_) {}
+  try { localStorage.removeItem(LS_SYNC_KEY);  } catch (_) {}
+  const url = new URL(window.location.href);
+  url.searchParams.set('_v', Date.now());
+  window.location.replace(url.toString());
+}
+
 /* loadAllData — fetches from the sheet with:
    • In-flight deduplication: concurrent calls share one request
    • Staleness guard: skips fetch if data is < DATA_STALE_MS old
