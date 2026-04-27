@@ -2846,13 +2846,14 @@ function renderLibrary() {
 /* ════════════════════════════════════════════════════════════
    DATA LOADING
 ════════════════════════════════════════════════════════════ */
-/* hardRefresh — clears every local cache then reloads the page with a
-   cache-busting query parameter so the browser always fetches the latest
-   version deployed to GitHub Pages rather than serving a stale copy. */
+/* hardRefresh — forces the browser to load the latest deployed HTML/JS/CSS
+   via a cache-busting URL parameter, then forces a fresh data fetch on the
+   next load via a sessionStorage flag.  Library cache is intentionally kept
+   so content (including Mariners) is visible immediately on reload even if
+   the Apps Script is momentarily unavailable. */
 function hardRefresh() {
-  try { localStorage.removeItem(LS_CACHE_KEY); } catch (_) {}
-  try { localStorage.removeItem(LS_REC_KEY);   } catch (_) {}
-  try { localStorage.removeItem(LS_SYNC_KEY);  } catch (_) {}
+  try { localStorage.removeItem(LS_SYNC_KEY); } catch (_) {}
+  try { sessionStorage.setItem('forceDataRefresh', '1'); } catch (_) {}
   const url = new URL(window.location.href);
   url.searchParams.set('_v', Date.now());
   window.location.replace(url.toString());
@@ -2907,6 +2908,16 @@ function loadAllData({ force = false } = {}) {
     .catch(err => {
       console.error('loadAllData:', err);
       S.connStatus = 'err';
+      /* If we already have data in memory (restored from cache before the fetch
+         started), keep displaying it and show a soft warning rather than wiping
+         the grid — this prevents Mariners and other content from disappearing
+         when the Apps Script is temporarily unavailable. */
+      if (S.allMovies.length || S.allShows.length || S.allLivetv.length) {
+        renderLibrary();
+        renderScheduleTab();
+        toast('Could not refresh — showing saved data', 'error');
+        return;
+      }
       const detail = err.message ? `<p style="font-size:12px;color:var(--text-2);margin-top:6px;word-break:break-word">${esc(err.message)}</p>` : '';
       const errHtml = `
         <div class="error-state">
@@ -5333,7 +5344,19 @@ async function dislikeRecommendedResult(idx) {
   // Restore cached For You recommendations so the tab is never blank on reload
   restoreRecCache();
 
-  loadAllData()
+  // After a hardRefresh(), sessionStorage carries a flag so we force a
+  // fresh data fetch even if the localStorage cache is still within DATA_STALE_MS.
+  const forceAfterHardRefresh = (() => {
+    try {
+      if (sessionStorage.getItem('forceDataRefresh')) {
+        sessionStorage.removeItem('forceDataRefresh');
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  })();
+
+  loadAllData({ force: forceAfterHardRefresh })
     .then(() => deduplicateAll(true))
     .then(() => autoSyncMissingSchedules())
     .catch(() => {});
