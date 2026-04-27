@@ -3049,7 +3049,7 @@ function renderUpcomingRail(tab) {
 
 /* Hero card for the single next upcoming item. Returns '' if nothing is coming up. */
 function renderNextUpHero(days) {
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < 14; i++) {
     const items = days[i];
     if (!items || !items.length) continue;
     const { raw, idx, text, date, tab } = items[0];
@@ -3103,7 +3103,7 @@ function collectThisWeek() {
   function pushEntry(raw, idx, text, date, tab, label, network) {
     const startOfTarget = new Date(date.getFullYear(), date.getMonth(), date.getDate());
     const diff = Math.round((startOfTarget - startOfToday) / 86400000);
-    if (diff < 0 || diff >= 7) return;
+    if (diff < 0 || diff >= 14) return;
     if (!days[diff]) days[diff] = [];
     days[diff].push({ raw, idx, text, date, tab, label: label ?? null, network: network ?? null });
   }
@@ -3203,7 +3203,7 @@ function collectThisWeek() {
       return tieByTitle(a, b);
     });
   }
-  for (let i = 1; i < 7; i++) {
+  for (let i = 1; i < 14; i++) {
     if (!days[i]) continue;
     days[i].sort((a, b) => {
       if (a.date.getTime() !== b.date.getTime()) return a.date - b.date;
@@ -3492,7 +3492,7 @@ function renderScheduleTab() {
   const nowAmpm = nowH >= 12 ? 'pm' : 'am';
   const nowTime = `${nowH % 12 || 12}:${String(nowM).padStart(2,'0')}${nowAmpm}`;
 
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < 14; i++) {
     const allItems = days[i];
     if (!allItems || !allItems.length) continue;
     const items = allItems.filter(scheduleMatchesQuery);
