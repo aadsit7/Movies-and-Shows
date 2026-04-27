@@ -208,6 +208,17 @@
       color: var(--accent);
       font-weight: 600;
     }
+    .nav-rec-loading {
+      margin-left: auto;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.4; transform: scale(0.7); }
+    }
     .side-menu-icon {
       width: 24px;
       text-align: center;
@@ -1968,6 +1979,8 @@ const DATA_STALE_MS = 5 * 60 * 1000;  // 5 min — don't re-fetch fresher than t
 const LS_CACHE_KEY    = 'fmtCache_v2';
 const LS_SYNC_KEY     = 'fmtLastSync_v2';   // timestamp of last auto-schedule-sync
 const CACHE_SCHEMA_V  = 3;                  // bump when data shape changes to auto-clear old caches
+const LS_REC_KEY      = 'fmtRec_v1';        // cached For You recommendations
+const REC_CACHE_TTL   = 24 * 60 * 60 * 1000; // 24 hours
 
 function saveCache() {
   try {
@@ -1998,6 +2011,35 @@ function restoreCache() {
   } catch (_) {
     return false;
   }
+}
+
+function saveRecCache() {
+  try {
+    const R = S.recommended;
+    if (!R.results || !R.results.length) return;
+    localStorage.setItem(LS_REC_KEY, JSON.stringify({
+      profile:    R.profile,
+      results:    R.results,
+      note:       R.note,
+      forProfile: S.profile,
+      at:         Date.now()
+    }));
+  } catch (_) {}
+}
+
+function restoreRecCache() {
+  try {
+    const raw = localStorage.getItem(LS_REC_KEY);
+    if (!raw) return false;
+    const d = JSON.parse(raw);
+    if (!d || !Array.isArray(d.results) || !d.at) return false;
+    if (Date.now() - d.at > REC_CACHE_TTL) return false;
+    if (d.forProfile !== S.profile) return false;
+    S.recommended.profile = d.profile || '';
+    S.recommended.results = d.results || [];
+    S.recommended.note    = d.note    || '';
+    return true;
+  } catch (_) { return false; }
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -2592,13 +2634,16 @@ function renderSideMenu() {
   const el = document.getElementById('side-menu-list');
   if (!el) return;
   const cur = currentPublicTab();
-  const navHtml = NAV_MENU_ITEMS.map(item => `
+  const navHtml = NAV_MENU_ITEMS.map(item => {
+    const isRecLoading = item.key === 'recommended' && S.recommended && S.recommended.loading;
+    return `
     <button class="side-menu-item${cur === item.key ? ' active' : ''}"
             onclick="navigateTo('${item.key}')">
       <span class="side-menu-icon">${item.icon}</span>
       <span>${item.label}</span>
-    </button>
-  `).join('');
+      ${isRecLoading ? '<span class="nav-rec-loading" title="Finding your picks…"></span>' : ''}
+    </button>`;
+  }).join('');
   const libHtml = LIBRARY_MENU_ITEMS.map(item => `
     <button class="side-menu-item${(cur === 'guide' && S.libraryType === item.key) ? ' active' : ''}"
             onclick="setLibraryType('${item.key}')">
@@ -5037,7 +5082,13 @@ function renderRecommendedTab() {
     : (hasResults ? '↻ Refresh picks' : '🔎 Search for things you might like');
 
   let body = '';
-  if (R.loading) {
+  if (R.loading && hasResults) {
+    // Refreshing with existing results — keep them visible, dim them, show progress above
+    body = `
+      <div class="loading-row" style="margin-bottom:14px"><div class="spinner"></div>Searching the web for fresh picks…</div>
+      ${R.profile ? `<div class="recommend-profile"><span class="profile-label">Your taste fingerprint</span>${esc(R.profile)}</div>` : ''}
+      <div class="search-results-list" style="opacity:0.5;pointer-events:none">${renderRecommendedResults(R.results)}</div>`;
+  } else if (R.loading) {
     body = `<div class="loading-row"><div class="spinner"></div>Building your taste profile and searching the web…</div>`;
   } else if (R.error) {
     body = `<p style="color:var(--error);padding:16px 0;font-size:14px">${esc(R.error)}</p>`;
@@ -5157,7 +5208,13 @@ async function requestRecommendations() {
     R.error = msg;
   } finally {
     R.loading = false;
-    if (S.tab === 'recommended') renderRecommendedTab();
+    saveRecCache();
+    renderSideMenu(); // clear nav loading badge
+    if (S.tab === 'recommended') {
+      renderRecommendedTab();
+    } else if (R.results && R.results.length) {
+      toast('✨ Your picks are ready — tap For You to see them');
+    }
   }
 }
 
@@ -5260,6 +5317,9 @@ async function dislikeRecommendedResult(idx) {
   if (hasCached) {
     renderScheduleTab();
   }
+
+  // Restore cached For You recommendations so the tab is never blank on reload
+  restoreRecCache();
 
   loadAllData()
     .then(() => deduplicateAll(true))
