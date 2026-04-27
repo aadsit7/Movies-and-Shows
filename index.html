@@ -99,25 +99,45 @@
     .header-refresh:active { opacity: .6; }
     .header-refresh.spinning { animation: spin .8s linear infinite; }
 
-    /* ── Initial-load progress bar ─────────────────────────── */
+    /* ── Initial-load progress pill ────────────────────────── */
     #load-progress-bar {
       position: fixed;
-      top: 0;
-      left: 0;
-      width: 0%;
-      height: 3px;
-      background: linear-gradient(90deg, var(--accent, #0096cc), #00d4ff);
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0.88);
+      background: rgba(0,0,0,0.82);
+      color: #fff;
+      border-radius: 999px;
+      padding: 13px 26px;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      display: flex;
+      align-items: center;
+      gap: 10px;
       z-index: 99999;
-      transition: width 0.35s ease;
       opacity: 0;
       pointer-events: none;
-      border-radius: 0 2px 2px 0;
+      transition: opacity 0.18s ease, transform 0.18s ease;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      box-shadow: 0 4px 24px rgba(0,0,0,0.35);
+      white-space: nowrap;
     }
-    #load-progress-bar.lpb-active { opacity: 1; }
+    #load-progress-bar.lpb-active {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
     #load-progress-bar.lpb-done {
-      width: 100% !important;
-      transition: width 0.2s ease, opacity 0.35s ease 0.15s;
       opacity: 0;
+      transform: translate(-50%, -50%) scale(0.9);
+      transition: opacity 0.28s ease, transform 0.28s ease;
+    }
+    .lpb-spinner {
+      display: inline-block;
+      animation: spin 0.9s linear infinite;
+      font-size: 17px;
+      line-height: 1;
     }
 
     /* ── Hamburger menu button + side drawer ──────────────── */
@@ -1837,8 +1857,8 @@
 </head>
 <body>
 
-<!-- Top progress bar — shown only during the initial data load -->
-<div id="load-progress-bar"></div>
+<!-- Loading pill — shown only during the initial cold-open data fetch -->
+<div id="load-progress-bar"><span class="lpb-spinner">↻</span> Loading…</div>
 
 <!-- Profile selector screen (shown before app until a profile is chosen) -->
 <div id="profile-selector">
@@ -2988,30 +3008,19 @@ function buildErrorHtml(err) {
     </div>`;
 }
 
-/* ── Initial-load progress bar helpers ──────────────────── */
-let _lpbTimer = null;
-
+/* ── Initial-load progress pill helpers ─────────────────── */
 function showLoadProgress() {
   const bar = document.getElementById('load-progress-bar');
   if (!bar) return;
-  if (_lpbTimer) { clearInterval(_lpbTimer); _lpbTimer = null; }
   bar.classList.remove('lpb-done');
-  bar.style.width = '0%';
   bar.classList.add('lpb-active');
-  let pct = 0;
-  _lpbTimer = setInterval(() => {
-    pct = Math.min(pct + (pct < 50 ? 9 : pct < 75 ? 3 : 0.5), 85);
-    bar.style.width = pct + '%';
-  }, 280);
 }
 
 function hideLoadProgress() {
-  if (_lpbTimer) { clearInterval(_lpbTimer); _lpbTimer = null; }
   const bar = document.getElementById('load-progress-bar');
   if (!bar) return;
-  bar.style.width = '100%';
-  bar.classList.add('lpb-done');
-  setTimeout(() => { bar.classList.remove('lpb-active', 'lpb-done'); bar.style.width = '0%'; }, 600);
+  bar.classList.replace('lpb-active', 'lpb-done');
+  setTimeout(() => bar.classList.remove('lpb-done'), 400);
 }
 
 /* loadAllData — fetches live data from Google Sheets.
