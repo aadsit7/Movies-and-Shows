@@ -1973,74 +1973,20 @@ let searchIndex   = [];  // [{raw, tab, idx, titleLc, airsDate, haystack}]
 let _indexDirty   = true;
 let _filterTimer  = null;
 let _loadInFlight = null;   // deduplicates concurrent loadAllData() calls
-const DATA_STALE_MS = 5 * 60 * 1000;  // 5 min — don't re-fetch fresher than this
 
-/* ── Local-storage cache (instant display on re-open) ───── */
-const LS_CACHE_KEY    = 'fmtCache_v2';
-const LS_SYNC_KEY     = 'fmtLastSync_v2';   // timestamp of last auto-schedule-sync
-const CACHE_SCHEMA_V  = 3;                  // bump when data shape changes to auto-clear old caches
-const LS_REC_KEY      = 'fmtRec_v1';        // cached For You recommendations
-const REC_CACHE_TTL   = 24 * 60 * 60 * 1000; // 24 hours
+/* Library data is always fetched live from Google Sheets — no localStorage
+   cache for content.  The only thing persisted is the selected profile
+   (LS_PROFILE_KEY).  These stubs keep old call-sites from throwing. */
+function saveCache()       {}
+function restoreCache()    { return false; }
+function saveRecCache()    {}
+function restoreRecCache() { return false; }
 
-function saveCache() {
-  try {
-    localStorage.setItem(LS_CACHE_KEY, JSON.stringify({
-      v:      CACHE_SCHEMA_V,
-      movies: S.allMovies,
-      shows:  S.allShows,
-      livetv: S.allLivetv,
-      at:     Date.now()
-    }));
-  } catch (_) {}
-}
-
-function restoreCache() {
-  try {
-    const raw = localStorage.getItem(LS_CACHE_KEY);
-    if (!raw) return false;
-    const d = JSON.parse(raw);
-    /* Reject caches written by an older schema version */
-    if (!d || d.v !== CACHE_SCHEMA_V || !Array.isArray(d.shows)) return false;
-    S.allMovies  = d.movies || [];
-    S.allShows   = d.shows  || [];
-    S.allLivetv  = d.livetv || [];
-    S.lastSynced = d.at ? new Date(d.at) : null;
-    S.connStatus = 'ok';
-    applyProfileFilter();
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
-
-function saveRecCache() {
-  try {
-    const R = S.recommended;
-    if (!R.results || !R.results.length) return;
-    localStorage.setItem(LS_REC_KEY, JSON.stringify({
-      profile:    R.profile,
-      results:    R.results,
-      note:       R.note,
-      forProfile: S.profile,
-      at:         Date.now()
-    }));
-  } catch (_) {}
-}
-
-function restoreRecCache() {
-  try {
-    const raw = localStorage.getItem(LS_REC_KEY);
-    if (!raw) return false;
-    const d = JSON.parse(raw);
-    if (!d || !Array.isArray(d.results) || !d.at) return false;
-    if (Date.now() - d.at > REC_CACHE_TTL) return false;
-    if (d.forProfile !== S.profile) return false;
-    S.recommended.profile = d.profile || '';
-    S.recommended.results = d.results || [];
-    S.recommended.note    = d.note    || '';
-    return true;
-  } catch (_) { return false; }
-}
+/* One-time cleanup: remove any stale cache keys left over from the old scheme */
+try {
+  ['fmtCache_v2', 'fmtLastSync_v2', 'fmtRec_v1',
+   'fmtCache_v1', 'fmtLastSync_v1'].forEach(k => localStorage.removeItem(k));
+} catch (_) {}
 
 /* ════════════════════════════════════════════════════════════
    UTILITY HELPERS
@@ -2846,29 +2792,17 @@ function renderLibrary() {
 /* ════════════════════════════════════════════════════════════
    DATA LOADING
 ════════════════════════════════════════════════════════════ */
-/* hardRefresh — forces the browser to load the latest deployed HTML/JS/CSS
-   via a cache-busting URL parameter, then forces a fresh data fetch on the
-   next load via a sessionStorage flag.  Library cache is intentionally kept
-   so content (including Mariners) is visible immediately on reload even if
-   the Apps Script is momentarily unavailable. */
+/* hardRefresh — reloads the page with a cache-busting query parameter so the
+   browser always fetches the latest HTML/JS/CSS deployed to GitHub Pages. */
 function hardRefresh() {
-  try { localStorage.removeItem(LS_SYNC_KEY); } catch (_) {}
-  try { sessionStorage.setItem('forceDataRefresh', '1'); } catch (_) {}
   const url = new URL(window.location.href);
   url.searchParams.set('_v', Date.now());
   window.location.replace(url.toString());
 }
 
-/* loadAllData — fetches from the sheet with:
-   • In-flight deduplication: concurrent calls share one request
-   • Staleness guard: skips fetch if data is < DATA_STALE_MS old
-   • forceRefresh bypasses both guards (used by manual refresh button) */
+/* loadAllData — always fetches live data from Google Sheets.
+   In-flight deduplication prevents duplicate concurrent requests. */
 function loadAllData({ force = false } = {}) {
-  /* If data is fresh enough and not being forced, use what we have */
-  if (!force && S.lastSynced && (Date.now() - S.lastSynced.getTime()) < DATA_STALE_MS) {
-    return Promise.resolve();
-  }
-
   /* Return the in-flight promise if one is already running */
   if (_loadInFlight) return _loadInFlight;
 
@@ -2901,23 +2835,12 @@ function loadAllData({ force = false } = {}) {
       S.lastSynced = new Date();
       S.connStatus = 'ok';
       applyProfileFilter();
-      saveCache();
       renderLibrary();
       renderScheduleTab();
     })
     .catch(err => {
       console.error('loadAllData:', err);
       S.connStatus = 'err';
-      /* If we already have data in memory (restored from cache before the fetch
-         started), keep displaying it and show a soft warning rather than wiping
-         the grid — this prevents Mariners and other content from disappearing
-         when the Apps Script is temporarily unavailable. */
-      if (S.allMovies.length || S.allShows.length || S.allLivetv.length) {
-        renderLibrary();
-        renderScheduleTab();
-        toast('Could not refresh — showing saved data', 'error');
-        return;
-      }
       const detail = err.message ? `<p style="font-size:12px;color:var(--text-2);margin-top:6px;word-break:break-word">${esc(err.message)}</p>` : '';
       const errHtml = `
         <div class="error-state">
@@ -2985,7 +2908,6 @@ async function loadTabData(tab) {
     S.lastSynced = new Date();
     S.connStatus = 'ok';
     applyProfileFilter();
-    saveCache();
     if (tab === 'upcoming' || tab === 'schedule') renderScheduleTab();
     else renderLibrary();
   } catch (err) {
@@ -4836,10 +4758,9 @@ async function autoSyncMissingSchedules() {
   /* Skip if the URL hasn't been configured yet */
   if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes('YOUR_SCRIPT_ID')) return;
 
-  // Throttle: skip if we already ran within the last 6 hours.
+  // Throttle: skip if we already ran this session (per-tab, not persisted).
   try {
-    const last = parseInt(localStorage.getItem(LS_SYNC_KEY) || '0', 10);
-    if (Date.now() - last < 6 * 3600 * 1000) return;
+    if (sessionStorage.getItem('autoSyncRan')) return;
   } catch (_) {}
 
   const needsSync = [];
@@ -4859,8 +4780,8 @@ async function autoSyncMissingSchedules() {
     if (!next && rowIdx) needsSync.push({ item: raw, tab: 'livetv', idx, rowIdx });
   });
 
-  // Record timestamp now so repeated fast opens don't re-queue while syncing.
-  try { localStorage.setItem(LS_SYNC_KEY, String(Date.now())); } catch (_) {}
+  // Record flag now so repeated fast calls within the same tab don't re-queue.
+  try { sessionStorage.setItem('autoSyncRan', '1'); } catch (_) {}
 
   if (!needsSync.length) return;
 
@@ -5335,28 +5256,8 @@ async function dislikeRecommendedResult(idx) {
   const schedulePanel = document.getElementById('tab-upcoming');
   if (schedulePanel) schedulePanel.classList.add('active');
 
-  // Restore cached data for instant display
-  const hasCached = restoreCache();
-  if (hasCached) {
-    renderScheduleTab();
-  }
-
-  // Restore cached For You recommendations so the tab is never blank on reload
-  restoreRecCache();
-
-  // After a hardRefresh(), sessionStorage carries a flag so we force a
-  // fresh data fetch even if the localStorage cache is still within DATA_STALE_MS.
-  const forceAfterHardRefresh = (() => {
-    try {
-      if (sessionStorage.getItem('forceDataRefresh')) {
-        sessionStorage.removeItem('forceDataRefresh');
-        return true;
-      }
-    } catch (_) {}
-    return false;
-  })();
-
-  loadAllData({ force: forceAfterHardRefresh })
+  // Always load live data from Google Sheets — no local library cache.
+  loadAllData()
     .then(() => deduplicateAll(true))
     .then(() => autoSyncMissingSchedules())
     .catch(() => {});
