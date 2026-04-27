@@ -5060,7 +5060,8 @@ async function requestRecommendations() {
 
   try {
     const raw = await apiPost(
-      { action: 'recommendForMe', library: { movies: S.movies, shows: S.shows } },
+      { action: 'recommendForMe', profile: S.profile,
+        library: { movies: S.movies, shows: S.shows, livetv: S.livetv } },
       { retries: 1, timeoutMs: 180000 }
     );
     if (raw?.error) throw new Error(raw.error);
