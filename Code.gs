@@ -360,7 +360,7 @@ function doPost(e) {
     if (action === 'updateRow')         return respondJson(handleUpdateRow(body.sheetName, body.rowIndex, body.rowData));
     if (action === 'deleteRow')         return respondJson(handleDeleteRow(body.sheetName, body.rowIndex));
     if (action === 'claudeSearch')      return respondJson(handleClaudeSearch(body.query, body.sheetName, body.clientDatetime));
-    if (action === 'recommendForMe')    return respondJson(handleRecommendForMe());
+    if (action === 'recommendForMe')    return respondJson(handleRecommendForMe(body));
     if (action === 'dislike')           return respondJson(handleDislike(body.title, body.type));
     if (action === 'removeDuplicates')  return respondJson(removeDuplicatesFromSheet(body.sheetName));
     if (action === 'saveEpisodes')      return respondJson(handleSaveEpisodes(body.title, body.episodes));
@@ -1072,7 +1072,7 @@ function readDislikedTitles() {
   } catch (_) { return []; }
 }
 
-function handleRecommendForMe() {
+function handleRecommendForMe(body) {
   var settings = getSettings();
   if (!settingEnabled(settings, 'search_enabled')) {
     return { error: 'Search is currently disabled. Enable it in the Settings sheet (search_enabled = TRUE).' };
@@ -1083,17 +1083,52 @@ function handleRecommendForMe() {
     return { error: 'Missing ANTHROPIC_API_KEY — set it in Apps Script → Project Settings → Script Properties' };
   }
 
-  /* Read library digest. We use the unified read so we get the same
-     dedupe + projection treatment the front-end sees. */
-  var media = readAllMedia();
-  var movies = (media && media.movies) || [];
-  var shows  = (media && media.shows)  || [];
+  /* Use the profile-filtered library sent by the client when available.
+     This ensures recommendations are scoped to the active profile's content. */
+  var movies, shows, livetv;
+  var activeProfile = (body && body.profile) || '';
+  var providedLib   = body && body.library;
 
-  if (movies.length + shows.length < 3) {
+  if (providedLib && Array.isArray(providedLib.movies)) {
+    movies = providedLib.movies;
+    shows  = providedLib.shows  || [];
+    livetv = providedLib.livetv || [];
+  } else {
+    var media = readAllMedia();
+    movies = (media && media.movies) || [];
+    shows  = (media && media.shows)  || [];
+    livetv = (media && media.liveTV) || [];
+  }
+
+  /* Backend-side profile filter (safety net when frontend filter may not have run) */
+  function isPopNana(item) { return (item && (item.profile || '')).toLowerCase() === 'popnana'; }
+  function isSeattleTeam(item) {
+    var name = ((item.favorite_team_or_channel || item.title || item.team || '')).toLowerCase();
+    return name.indexOf('seahawk') !== -1 || name.indexOf('mariner') !== -1;
+  }
+  if (activeProfile === 'popnana') {
+    movies = movies.filter(isPopNana);
+    shows  = shows.filter(isPopNana);
+    livetv = livetv.filter(function(l) { return isPopNana(l) || isSeattleTeam(l); });
+  } else {
+    movies = movies.filter(function(m) { return !isPopNana(m); });
+    shows  = shows.filter(function(s)  { return !isPopNana(s); });
+    livetv = livetv.filter(function(l) { return !isPopNana(l); });
+  }
+
+  /* Build a digestible sports/live-TV list for the taste profile */
+  var liveList = livetv.map(function(l) {
+    var name   = String(l.favorite_team_or_channel || l.title || l.team || '').trim();
+    if (!name) return '';
+    var league = String(l.league || l.live_tv_type || '').trim();
+    return league ? name + ' (' + league + ')' : name;
+  }).filter(Boolean).slice(0, 20);
+
+  if (movies.length + shows.length + liveList.length < 2) {
     return {
       profile: '',
       results: [],
-      note: 'Add at least a few movies or shows to your library so we can build a taste profile.'
+      note: 'Add at least a couple of titles to your library so we can build a taste profile.'
     };
   }
 
@@ -1142,17 +1177,20 @@ function handleRecommendForMe() {
     (movieList.length ? '- ' + movieList.join('\n- ') : '(none)') + '\n\n' +
     'TV SHOWS THE USER HAS SAVED (' + showList.length + '):\n' +
     (showList.length ? '- ' + showList.join('\n- ') : '(none)') + '\n\n' +
+    'SPORTS & LIVE TV THE USER FOLLOWS (' + liveList.length + '):\n' +
+    (liveList.length ? '- ' + liveList.join('\n- ') : '(none)') + '\n\n' +
     'TITLES THE USER HAS EXPLICITLY DISLIKED — do NOT recommend these under any circumstances:\n' +
     (dislikedTitles.length ? '- ' + dislikedTitles.join('\n- ') : '(none)') + '\n\n' +
     'Follow this four-phase framework strictly:\n\n' +
     'PHASE 1 — BUILD THE TASTE PROFILE BEFORE SEARCHING\n' +
-    'Synthesize the list above (do not search yet):\n' +
+    'Synthesize the lists above (do not search yet):\n' +
     '  1. GENRES: which genres dominate?\n' +
     '  2. TONES: which tones recur (slow-burn, satirical, emotionally heavy, witty, etc.)?\n' +
     '  3. THEMES: which subject matter repeats (moral ambiguity, class tension, found family, unreliable narrator, crime procedural, etc.)?\n' +
     '  4. ERA / FORMAT: prestige TV, indie film, blockbusters, foreign language, classics?\n' +
-    '  5. AVOID SIGNALS: which genres/tones are completely absent? Treat these as soft avoids.\n' +
-    '  6. TASTE FINGERPRINT: write a 2-3 sentence summary you will score every candidate against.\n\n' +
+    '  5. SPORTS & LIVE INTERESTS: factor in any teams or leagues from the SPORTS & LIVE TV list — these reveal regional loyalties and live-event preferences that should inform recommendations (sports documentaries, team-related content, broadcast live events).\n' +
+    '  6. AVOID SIGNALS: which genres/tones are completely absent? Treat these as soft avoids.\n' +
+    '  7. TASTE FINGERPRINT: write a 2-3 sentence summary you will score every candidate against.\n\n' +
     'PHASE 2 — RUN THREE PARALLEL SEARCH PASSES (use the web_search tool, free public sources only)\n' +
     '  PASS A — Streaming catalog: target JustWatch, Letterboxd, IMDb lists, Rotten Tomatoes. ' +
     'Query like "[theme/genre from fingerprint] best movies/shows ' + today.getFullYear() + '" and ' +

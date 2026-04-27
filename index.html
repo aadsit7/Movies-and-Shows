@@ -1911,17 +1911,22 @@ const LS_PROFILE_KEY = 'fmtProfile';
 
 /* Filter S.allMovies/Shows/Livetv into S.movies/shows/livetv based on active profile */
 function applyProfileFilter() {
+  const isPopNanaItem  = item => (item.profile || '').toLowerCase() === 'popnana';
+  const isSeattleTeam  = item => {
+    const name = (item.favorite_team_or_channel || item.title || item.team || '').toLowerCase();
+    return name.includes('seahawk') || name.includes('mariner');
+  };
+
   if (S.profile !== 'popnana') {
-    S.movies = S.allMovies;
-    S.shows  = S.allShows;
-    S.livetv = S.allLivetv;
+    // Adsit Family: hide anything explicitly tagged for Pop Pop & Nana
+    S.movies = S.allMovies.filter(item => !isPopNanaItem(item));
+    S.shows  = S.allShows.filter(item => !isPopNanaItem(item));
+    S.livetv = S.allLivetv.filter(item => !isPopNanaItem(item));
   } else {
-    S.movies = [];
-    S.shows  = [];
-    S.livetv = S.allLivetv.filter(item => {
-      const name = (item.favorite_team_or_channel || item.title || item.team || '').toLowerCase();
-      return name.includes('seahawk') || name.includes('mariner');
-    });
+    // Pop Pop & Nana: tagged items across all types + existing Seahawks/Mariners by keyword
+    S.movies = S.allMovies.filter(isPopNanaItem);
+    S.shows  = S.allShows.filter(isPopNanaItem);
+    S.livetv = S.allLivetv.filter(item => isPopNanaItem(item) || isSeattleTeam(item));
   }
   _indexDirty = true;
 }
@@ -2327,7 +2332,8 @@ async function claudeSearch(query, sheet = null) {
 }
 
 async function addRow(tab, rowData) {
-  return apiPost({ action: 'addRow', sheetName: sheetName(tab), rowData });
+  const data = S.profile === 'popnana' ? { ...rowData, profile: 'popnana' } : rowData;
+  return apiPost({ action: 'addRow', sheetName: sheetName(tab), rowData: data });
 }
 
 async function updateRow(tab, rowIndex, rowData) {
@@ -4326,7 +4332,8 @@ async function confirmSheetAdd(sheetTarget) {
 
   let response;
   try {
-    const postBody = { action: 'addRow', sheetName: sheetTarget, rowData: data };
+    const taggedData = S.profile === 'popnana' ? { ...data, profile: 'popnana' } : data;
+    const postBody = { action: 'addRow', sheetName: sheetTarget, rowData: taggedData };
     response = await fetch(APPS_SCRIPT_URL, {
       method:   'POST',
       headers:  { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -5052,7 +5059,11 @@ async function requestRecommendations() {
   renderRecommendedTab();
 
   try {
-    const raw = await apiPost({ action: 'recommendForMe' }, { retries: 1, timeoutMs: 180000 });
+    const raw = await apiPost(
+      { action: 'recommendForMe', profile: S.profile,
+        library: { movies: S.movies, shows: S.shows, livetv: S.livetv } },
+      { retries: 1, timeoutMs: 180000 }
+    );
     if (raw?.error) throw new Error(raw.error);
     R.profile = String(raw?.profile || '');
     R.results = Array.isArray(raw?.results) ? raw.results : [];
