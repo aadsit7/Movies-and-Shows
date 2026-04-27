@@ -3104,8 +3104,8 @@ function loadAllData({ force = false } = {}) {
   }
 
   _loadInFlight = fetchWithTimeout(
-    APPS_SCRIPT_URL + '?action=getAllMedia&forceRefresh=true',
-    { redirect: 'follow' },
+    APPS_SCRIPT_URL + '?action=getAllMedia&forceRefresh=true&_t=' + Date.now(),
+    { redirect: 'follow', cache: 'no-store' },
     30000
   )
     .then(r => {
