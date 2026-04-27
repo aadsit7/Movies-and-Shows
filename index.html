@@ -413,6 +413,31 @@
     #settings-search-input { height: 52px; }
     input::placeholder { color: var(--text-3); }
 
+    /* ── Status filter buttons (shows tab) ───────────────── */
+    .status-filter-row {
+      display: flex;
+      gap: 6px;
+      padding: 0 2px;
+    }
+    .status-filter-btn {
+      flex: 1;
+      height: 30px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--text-2);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .status-filter-btn.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
     /* ── Tab content panels ───────────────────────────────── */
     .tab-panel { display: none; }
     .tab-panel.active { display: block; }
@@ -2026,6 +2051,7 @@ const S = {
   libraryType:  'upcoming', // 'upcoming' | 'all' | 'movies' | 'shows' | 'livetv'
   prevPublicTab: 'guide',   // tab to return to when closing Search
   filter:       { shows: '', upcoming: '', schedule: '', settings: '' },
+  showStatusFilter: 'all',   // 'all' | 'returning' | 'ended'
   connStatus:   null,      // 'ok' | 'err' | null
   lastSynced:   null,
   lastError:    null,      // last Error object from loadAllData failure
@@ -2610,6 +2636,7 @@ function renderSubHeader(tab) {
   }
 
   if (tab === 'shows') {
+    const sf = S.showStatusFilter || 'all';
     el.innerHTML = `
       <div class="sub-header-row">
         <div class="search-wrap">
@@ -2620,6 +2647,11 @@ function renderSubHeader(tab) {
             oninput="onFilter('shows', this.value)"
           >
         </div>
+      </div>
+      <div class="status-filter-row">
+        <button class="status-filter-btn${sf === 'all'       ? ' active' : ''}" onclick="setShowStatusFilter('all')">All</button>
+        <button class="status-filter-btn${sf === 'returning' ? ' active' : ''}" onclick="setShowStatusFilter('returning')">Returning</button>
+        <button class="status-filter-btn${sf === 'ended'     ? ' active' : ''}" onclick="setShowStatusFilter('ended')">Ended</button>
       </div>`;
     return;
   }
@@ -2660,6 +2692,12 @@ function onFilter(tab, val) {
     else if (tab === 'shows') renderLibrary();
     else if (tab === 'settings') renderSettingsFilter();
   }, 150);
+}
+
+function setShowStatusFilter(val) {
+  S.showStatusFilter = val;
+  renderSubHeader('shows');
+  renderLibrary();
 }
 
 function renderSettingsFilter() {
@@ -2790,7 +2828,7 @@ function renderUpcomingLibrary() {
   const el = document.getElementById('upcoming-library');
   if (!el) return;
 
-  if ((S.filter.shows || '').trim()) { el.innerHTML = ''; return; }
+  if ((S.filter.shows || '').trim() || (S.showStatusFilter && S.showStatusFilter !== 'all')) { el.innerHTML = ''; return; }
 
   const type = S.libraryType;
   let items = [];
@@ -2861,6 +2899,17 @@ function renderLibrary() {
     entries = searchIndex.slice();
   } else {
     entries = searchIndex.filter(e => e.tab === type);
+  }
+
+  // Status filter (Returning / Ended) — applies only on the pure Shows view
+  const sf = S.showStatusFilter || 'all';
+  if (type === 'shows' && sf !== 'all') {
+    entries = entries.filter(e => {
+      const s = e.statusLc;
+      if (sf === 'returning') return s.includes('return') || s.includes('renew') || s.includes('ongoing') || s.includes('airing');
+      if (sf === 'ended')     return s.includes('end') || s.includes('cancel') || s.includes('complet') || s.includes('final');
+      return true;
+    });
   }
 
   if (words.length) {
