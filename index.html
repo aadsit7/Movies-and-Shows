@@ -2130,7 +2130,19 @@ function parseAiringDate(text) {
   // ISO yyyy-mm-dd (with optional time)
   const iso = txt.match(/(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2}))?/);
   if (iso) {
-    const d = new Date(+iso[1], +iso[2] - 1, +iso[3], +(iso[4] || 0), +(iso[5] || 0));
+    let hr = +(iso[4] || 0);
+    const mn = +(iso[5] || 0);
+    // Honour AM/PM suffix when present (e.g. "2026-04-27 7:10 PM PDT")
+    if (iso[4]) {
+      const rest = txt.slice(iso.index + iso[0].length);
+      const ampm = rest.match(/^\s*([ap]m)\b/i);
+      if (ampm) {
+        const isPm = ampm[1].toLowerCase() === 'pm';
+        if (isPm && hr < 12) hr += 12;
+        if (!isPm && hr === 12) hr = 0;
+      }
+    }
+    const d = new Date(+iso[1], +iso[2] - 1, +iso[3], hr, mn);
     if (!isNaN(d.getTime())) return d;
   }
 
@@ -3130,9 +3142,22 @@ function collectThisWeek() {
         /* Show every upcoming game within the next 7 days */
         raw.games.forEach(game => {
           if (!game.date) return;
-          const dateStr = game.time ? game.date + ' ' + game.time : game.date;
-          const date = parseAiringDate(dateStr);
-          if (!date) return;
+          const tStr = game.time || '';
+          let date;
+          /* If game.time is a raw UTC string (legacy data stored before the
+             timezone-conversion fix), parse the combined ISO datetime natively
+             so the browser converts UTC → local time automatically.
+             Detectable by a trailing Z or ±HH:MM timezone indicator. */
+          if (tStr && /Z$|[+-]\d{2}:\d{2}$/.test(tStr)) {
+            const combined = game.date + 'T' + tStr;
+            date = new Date(combined);
+            if (isNaN(date.getTime())) date = null;
+          } else {
+            const dateStr = tStr ? game.date + ' ' + tStr : game.date;
+            date = parseAiringDate(dateStr);
+          }
+          if (!date || isNaN(date.getTime())) return;
+          const dateStr = tStr ? game.date + ' ' + tStr : game.date;
           pushEntry(raw, idx, dateStr, date, tab,
             game.opponent ? 'vs ' + game.opponent : null,
             game.tv_channel || null);
