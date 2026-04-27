@@ -1041,6 +1041,31 @@
     .error-state .big-icon { font-size: 48px; margin-bottom: 12px; }
     .empty-state p, .error-state p { font-size: 14px; margin-bottom: 4px; }
     .error-state h3 { font-size: 17px; color: var(--text); margin-bottom: 6px; }
+    .error-detail {
+      font-size: 11px !important;
+      color: var(--text-3) !important;
+      font-family: monospace;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      margin: 8px auto !important;
+      max-width: 320px;
+      word-break: break-all;
+      text-align: left;
+    }
+    .error-sync-time {
+      font-size: 12px;
+      color: var(--text-3);
+      margin-top: 4px !important;
+    }
+    .error-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 14px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
 
     /* ── Buttons ──────────────────────────────────────────── */
     .btn {
@@ -1894,6 +1919,7 @@ const S = {
   filter:       { shows: '', upcoming: '', schedule: '', settings: '' },
   connStatus:   null,      // 'ok' | 'err' | null
   lastSynced:   null,
+  lastError:    null,      // last Error object from loadAllData failure
   refreshingAll:  false,
   updateProgress: '',      // "3 / 12 · Severance" while Update All is running
   sheetPreview:   null,    // result object currently shown in sheet/settings
@@ -2800,6 +2826,56 @@ function hardRefresh() {
   window.location.replace(url.toString());
 }
 
+/* Builds a rich error panel for loadAllData failures.
+   Categorises the error, shows last-sync time, and offers targeted fixes. */
+function buildErrorHtml(err) {
+  const msg = (err && err.message) ? err.message : String(err || '');
+  const lc  = msg.toLowerCase();
+
+  let heading, hint;
+  if (lc.includes('timeout') || lc.includes('timed out')) {
+    heading = 'Request timed out';
+    hint    = 'Apps Script takes a few seconds to warm up after inactivity — tap Try Again.';
+  } else if (lc.includes('failed to fetch') || lc.includes('networkerror') || lc.includes('offline') || lc.includes('net::')) {
+    heading = 'Network error';
+    hint    = 'Check your internet connection, then tap Try Again.';
+  } else if (lc.match(/http [45]\d\d/)) {
+    heading = 'Server error (' + (msg.match(/HTTP \d+/) || [''])[0] + ')';
+    hint    = 'The Apps Script returned an error. It may need to be redeployed with "Anyone" access.';
+  } else if (lc.includes('cors') || lc.includes('cross-origin') || lc.includes('blocked')) {
+    heading = 'Access blocked (CORS)';
+    hint    = 'Redeploy the Apps Script and make sure "Who has access" is set to Anyone.';
+  } else if (lc.includes('script id') || lc.includes('not found') || lc.includes('404')) {
+    heading = 'Script not found';
+    hint    = 'The Apps Script URL may be outdated. Redeploy and update APPS_SCRIPT_URL in index.html.';
+  } else {
+    heading = 'Couldn\'t reach Google Sheets';
+    hint    = 'Check that the Apps Script is deployed and the spreadsheet is shared correctly.';
+  }
+
+  let syncLine = '';
+  if (S.lastSynced) {
+    const ms     = Date.now() - S.lastSynced.getTime();
+    const mins   = Math.round(ms / 60000);
+    const label  = mins < 1 ? 'just now' : mins === 1 ? '1 minute ago' : mins + ' minutes ago';
+    syncLine = `<p class="error-sync-time">Last successful sync: ${label}</p>`;
+  }
+
+  return `
+    <div class="error-state">
+      <div class="big-icon">⚠️</div>
+      <h3>${esc(heading)}</h3>
+      <p>${esc(hint)}</p>
+      ${msg ? `<p class="error-detail">${esc(msg)}</p>` : ''}
+      ${syncLine}
+      <div class="error-actions">
+        <button class="btn btn-secondary btn-sm" onclick="loadAllData({ force: true })">↻ Try Again</button>
+        <a href="https://script.google.com/home" target="_blank" rel="noopener noreferrer"
+           class="btn btn-secondary btn-sm" style="text-decoration:none">Open Apps Script ↗</a>
+      </div>
+    </div>`;
+}
+
 /* loadAllData — always fetches live data from Google Sheets.
    In-flight deduplication prevents duplicate concurrent requests. */
 function loadAllData({ force = false } = {}) {
@@ -2834,6 +2910,7 @@ function loadAllData({ force = false } = {}) {
       S.allLivetv = data.liveTV || [];
       S.lastSynced = new Date();
       S.connStatus = 'ok';
+      S.lastError  = null;
       applyProfileFilter();
       renderLibrary();
       renderScheduleTab();
@@ -2841,16 +2918,8 @@ function loadAllData({ force = false } = {}) {
     .catch(err => {
       console.error('loadAllData:', err);
       S.connStatus = 'err';
-      const detail = err.message ? `<p style="font-size:12px;color:var(--text-2);margin-top:6px;word-break:break-word">${esc(err.message)}</p>` : '';
-      const errHtml = `
-        <div class="error-state">
-          <div class="big-icon">⚠️</div>
-          <h3>Couldn't load from Google Sheets</h3>
-          <p>Check that the Apps Script is deployed and the spreadsheet exists.</p>
-          ${detail}
-          <button class="btn btn-secondary btn-sm" style="margin-top:14px"
-            onclick="loadAllData({ force: true })">Try Again</button>
-        </div>`;
+      S.lastError  = err;
+      const errHtml = buildErrorHtml(err);
       if (libGrid) libGrid.innerHTML = errHtml;
       const schedBody = document.getElementById('schedule-body');
       if (schedBody && !schedBody.querySelector('.schedule-day-section')) {
@@ -2913,25 +2982,13 @@ async function loadTabData(tab) {
   } catch (err) {
     console.error('loadTabData:', err);
     S.connStatus = 'err';
+    S.lastError  = err;
+    const errHtml = buildErrorHtml(err);
     if (tab === 'upcoming' || tab === 'schedule') {
-      document.getElementById('schedule-body').innerHTML = `
-        <div class="error-state">
-          <div class="big-icon">⚠️</div>
-          <h3>Couldn't load upcoming</h3>
-          <p>Check your connection and sheet setup.</p>
-          <button class="btn btn-secondary btn-sm" style="margin-top:14px"
-            onclick="loadTabData('upcoming')">Try Again</button>
-        </div>`;
+      document.getElementById('schedule-body').innerHTML = errHtml;
     } else {
       const libGrid = document.getElementById('grid-library');
-      if (libGrid) libGrid.innerHTML = `
-        <div class="error-state">
-          <div class="big-icon">⚠️</div>
-          <h3>Couldn't load content</h3>
-          <p>Check your connection and sheet setup.</p>
-          <button class="btn btn-secondary btn-sm" style="margin-top:14px"
-            onclick="loadTabData('shows')">Try Again</button>
-        </div>`;
+      if (libGrid) libGrid.innerHTML = errHtml;
     }
   }
 }
