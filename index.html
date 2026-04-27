@@ -4376,7 +4376,7 @@ async function confirmSheetAdd(sheetTarget) {
 
   closeSheet();
   toast('Added!', 'success');
-  loadAllData();
+  loadAllData({ force: true });
 }
 
 /* ════════════════════════════════════════════════════════════

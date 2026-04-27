@@ -606,7 +606,7 @@ function handleAddRow(sheetName, rowData) {
     ensureColumns(sheet, LIVE_TV_FIELDS);
     var liveRow  = mapToSheetRow(rowData, 'liveTV');
     var liveTitle = (liveRow.favorite_team_or_channel || '').toLowerCase().trim();
-    if (liveTitle && hasDuplicate(sheet, 'favorite_team_or_channel', liveTitle)) {
+    if (liveTitle && hasDuplicate(sheet, 'favorite_team_or_channel', liveTitle, null, liveRow.profile)) {
       return { success: true, duplicate: true };
     }
     appendByHeaders(sheet, liveRow);
@@ -620,7 +620,7 @@ function handleAddRow(sheetName, rowData) {
     var kind       = isShowsSheet(sheetName) ? 'TV Show' : 'Movie';
     var contentRow = mapToSheetRow(rowData, kind);
     var titleVal   = (contentRow.title || '').toLowerCase().trim();
-    if (titleVal && hasDuplicate(sheet, 'title', titleVal, kind)) {
+    if (titleVal && hasDuplicate(sheet, 'title', titleVal, kind, contentRow.profile)) {
       return { success: true, duplicate: true };
     }
     appendByHeaders(sheet, contentRow);
@@ -633,17 +633,25 @@ function handleAddRow(sheetName, rowData) {
 /* Returns true if the sheet already has a row whose titleHeader column
    matches newTitle (case-insensitive). When contentType is provided, also
    requires the content_type column to match — so a Movie and a TV Show with
-   the same title are not considered duplicates of each other. */
-function hasDuplicate(sheet, titleHeader, newTitle, contentType) {
+   the same title are not considered duplicates of each other.
+   When profile is provided, only rows with the same profile value are
+   considered duplicates — items from different profiles can share a title. */
+function hasDuplicate(sheet, titleHeader, newTitle, contentType, profile) {
   var data = sheet.getDataRange().getValues();
   if (data.length <= 1) return false;
-  var headers  = normalizeHeaders(data[0]);
-  var titleIdx = headers.indexOf(titleHeader);
+  var headers    = normalizeHeaders(data[0]);
+  var titleIdx   = headers.indexOf(titleHeader);
   if (titleIdx === -1) return false;
-  var ctIdx = contentType ? headers.indexOf('content_type') : -1;
+  var ctIdx      = contentType ? headers.indexOf('content_type') : -1;
+  var profileIdx = headers.indexOf('profile');
+  var newProfileLc = (profile || '').toLowerCase().trim();
+
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][titleIdx]).toLowerCase().trim() !== newTitle) continue;
     if (ctIdx !== -1 && String(data[i][ctIdx]).trim().toLowerCase() !== contentType.toLowerCase()) continue;
+    /* Different profiles → not a duplicate; each profile owns its own library */
+    var existingProfile = profileIdx !== -1 ? String(data[i][profileIdx] || '').toLowerCase().trim() : '';
+    if (existingProfile !== newProfileLc) continue;
     return true;
   }
   return false;
