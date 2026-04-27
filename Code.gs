@@ -55,13 +55,15 @@ var CONTENT_FIELDS = [
   'title', 'content_type', 'genre_primary', 'age_rating',
   'description', 'year_started', 'seasons_count', 'tone', 'family_safe',
   'streaming_on', 'imdb_score', 'cast', 'director',
-  'network', 'status', 'latest_episode', 'next_airs', 'favorites', 'profile'
+  'network', 'status', 'latest_episode', 'next_airs', 'favorites', 'profile',
+  'watch_status'
 ];
 var LIVE_TV_FIELDS = [
   'favorite_team_or_channel', 'live_tv_type', 'league',
   'default_channel_or_provider', 'profile_name',
   'network', 'genre', 'description', 'streaming_on',
-  'next_game', 'tv_channel', 'favorites', 'profile'
+  'next_game', 'tv_channel', 'favorites', 'profile',
+  'watch_status'
 ];
 /* Episode_Schedule: one row per upcoming/recent episode; joined to a show
    by lowercased title. air_date should be ISO YYYY-MM-DD when known. */
@@ -755,7 +757,8 @@ function mapToSheetRow(data, kind) {
       next_game:     firstOf(data, ['nextGame', 'next_game', 'nextAirs', 'next_airs']),
       tv_channel:    firstOf(data, ['tvChannel', 'tv_channel']),
       favorites:     firstOf(data, ['favorites', 'favorite']),
-      profile:       firstOf(data, ['profile'])
+      profile:       firstOf(data, ['profile']),
+      watch_status:  firstOf(data, ['watch_status', 'watchStatus'])
     };
   }
 
@@ -779,7 +782,8 @@ function mapToSheetRow(data, kind) {
     latest_episode: firstOf(data, ['latestEpisode', 'latest_episode']),
     next_airs:      firstOf(data, ['nextAirs', 'next_airs', 'nextAiring', 'airing', 'whenitairs']),
     favorites:      firstOf(data, ['favorites', 'favorite']),
-    profile:        firstOf(data, ['profile'])
+    profile:        firstOf(data, ['profile']),
+    watch_status:   firstOf(data, ['watch_status', 'watchStatus'])
   };
 }
 
