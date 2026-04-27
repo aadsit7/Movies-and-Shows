@@ -1316,7 +1316,7 @@ function handleRecommendForMe(body) {
 
   var payload = {
     model:      ANTHROPIC_MODEL,
-    max_tokens: 4096,
+    max_tokens: 16000,
     tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 12 }],
     messages: [{ role: 'user', content: prompt }]
   };
@@ -1359,6 +1359,10 @@ function handleRecommendForMe(body) {
   var apiResult;
   try { apiResult = JSON.parse(body); }
   catch (e) { return { error: 'Bad API response: ' + body.substring(0, 200) }; }
+
+  if (apiResult.stop_reason === 'max_tokens') {
+    return { error: 'Recommendation response was too long to process — please try again.' };
+  }
 
   var text = extractTextFromContent(apiResult.content);
   if (!text) return { error: 'Empty response from Claude' };
