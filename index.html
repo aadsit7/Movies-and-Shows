@@ -4922,6 +4922,8 @@ async function saveSearchResult(idx) {
   else if (tab === 'shows') S.allShows.push(item);
   else S.allLivetv.push(item);
   applyProfileFilter();
+  renderLibrary();
+  renderScheduleTab();
 
   try {
     const result = await addRow(tab, item);
@@ -5110,33 +5112,42 @@ async function saveRecommendedResult(idx) {
   const btn = document.getElementById('rec-save-btn-' + idx);
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
 
+  const tab = resultTab(item);
+
+  // Tag and optimistically add to state before the network call.
+  if (S.profile === 'popnana') item.profile = 'popnana';
+  item.content_type = item.content_type || (tab === 'movies' ? 'Movie' : tab === 'shows' ? 'TV Show' : '');
+  if (tab === 'movies') S.allMovies.push(item);
+  else if (tab === 'shows') S.allShows.push(item);
+  else S.allLivetv.push(item);
+  applyProfileFilter();
+  renderLibrary();
+  renderScheduleTab();
+
   try {
-    const tab    = resultTab(item);
     const result = await addRow(tab, item);
 
     if (result?.duplicate) {
+      if (tab === 'movies') S.allMovies = S.allMovies.filter(m => m !== item);
+      else if (tab === 'shows') S.allShows = S.allShows.filter(s => s !== item);
+      else S.allLivetv = S.allLivetv.filter(l => l !== item);
+      applyProfileFilter();
       if (btn) { btn.disabled = false; btn.textContent = 'Already saved ✓'; }
       toast('Already in your library!', '');
       return;
     }
     if (result?.error) throw new Error(result.error);
 
-    if (tab === 'movies') {
-      item.content_type = item.content_type || 'Movie';
-      S.movies.push(item);
-    } else if (tab === 'shows') {
-      item.content_type = item.content_type || 'TV Show';
-      S.shows.push(item);
-    } else {
-      S.livetv.push(item);
-    }
-    _indexDirty = true;
+    if (result?.rowIndex) item.rowIndex = result.rowIndex;
 
     if (btn) { btn.textContent = 'Saved ✓'; }
     toast(`"${pick(norm(item), 'title', 'channel')}" added!`, 'success');
-
-    loadAllData({ force: true });
   } catch (err) {
+    // Roll back optimistic item on failure.
+    if (tab === 'movies') S.allMovies = S.allMovies.filter(m => m !== item);
+    else if (tab === 'shows') S.allShows = S.allShows.filter(s => s !== item);
+    else S.allLivetv = S.allLivetv.filter(l => l !== item);
+    applyProfileFilter();
     if (btn) { btn.disabled = false; btn.textContent = 'Save to Library'; }
     toast('Save failed — ' + (err.message || 'try again'), 'error');
   }
