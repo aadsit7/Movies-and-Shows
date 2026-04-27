@@ -756,14 +756,14 @@
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: 14px;
-      padding: 12px 14px;
+      padding: 12px 14px 42px;  /* bottom pad makes room for the watch-status button */
       position: relative;
       animation: fadeUp .25s ease both;
       overflow: hidden;
       box-shadow: 0 1px 2px rgba(0,0,0,.04);
       /* skip rendering off-screen cards for buttery scrolling on long lists */
       content-visibility: auto;
-      contain-intrinsic-size: 1px 110px;
+      contain-intrinsic-size: 1px 130px;
     }
     /* subtle accent stripe on the left edge — far less visually heavy than the
        previous 4px solid border, but still keeps a clear brand cue */
@@ -933,6 +933,32 @@
       from { transform: rotate(0deg); }
       to   { transform: rotate(360deg); }
     }
+
+    /* ── Watch-status button ─────────────────────────────── */
+    .watch-btn {
+      position: absolute;
+      bottom: 8px;
+      right: 8px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 3px 9px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      line-height: 1;
+      color: var(--text-2);
+      -webkit-tap-highlight-color: transparent;
+      transition: background .15s, color .15s, transform .12s;
+      white-space: nowrap;
+    }
+    .watch-btn:active { transform: scale(.92); }
+    .watch-btn.ws-watching { background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }
+    .watch-btn.ws-watched  { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
 
     .favorite-btn {
       position: absolute;
@@ -3829,6 +3855,7 @@ function renderCard(raw, tab, idx) {
   }
 
   const fav = isFavorite(raw);
+  const ws  = getWatchStatus(raw);
   return `
     <div class="media-card" data-tab="${tab}" data-idx="${idx}" data-row="${esc(rowIndex)}"
          onclick="openDetailSheet('${tab}', ${idx})">
@@ -3841,6 +3868,9 @@ function renderCard(raw, tab, idx) {
       ${badgesHtml ? `<div class="badges-row">${badgesHtml}</div>` : ''}
       ${extraHtml}
       ${desc ? `<p class="card-desc">${esc(desc)}</p>` : ''}
+      <button class="watch-btn${ws ? ' ' + WATCH_CLASS[ws] : ''}"
+              onclick="event.stopPropagation(); cycleWatchStatus(this)"
+              title="Cycle watch status">${WATCH_LABEL[ws]}</button>
       <button class="favorite-btn${fav ? ' is-favorite' : ''}"
               onclick="event.stopPropagation(); toggleFavorite(this)"
               aria-pressed="${fav ? 'true' : 'false'}"
@@ -3897,6 +3927,52 @@ async function toggleFavorite(btn) {
   /* If we're currently viewing the Favorites filter, an unfavorited card
      should disappear from the grid — re-render to reflect that. */
   if (S.libraryType === 'favorites') renderLibrary();
+}
+
+/* ── Watch-status helpers ──────────────────────────────────── */
+/* Values: '' = not started, 'watching' = in progress, 'watched' = done */
+const WATCH_CYCLE = ['', 'watching', 'watched'];
+const WATCH_LABEL = { '': '＋ Add to Watchlist', watching: '▶ Watching', watched: '✓ Watched' };
+const WATCH_CLASS = { '': '', watching: 'ws-watching', watched: 'ws-watched' };
+
+function getWatchStatus(raw) {
+  const v = pick(norm(raw), 'watch_status', 'watchstatus');
+  const lc = String(v || '').trim().toLowerCase();
+  return WATCH_CYCLE.includes(lc) ? lc : '';
+}
+
+async function cycleWatchStatus(btn) {
+  const card   = btn.closest('.media-card');
+  if (!card) return;
+  const tab    = card.dataset.tab;
+  const idx    = parseInt(card.dataset.idx, 10);
+  const rowNum = parseInt(card.dataset.row, 10);
+  const src    = tab === 'shows' ? S.shows : tab === 'movies' ? S.movies : S.livetv;
+  const raw    = src && src[idx];
+  if (!raw || !rowNum) return;
+
+  const cur  = getWatchStatus(raw);
+  const next = WATCH_CYCLE[(WATCH_CYCLE.indexOf(cur) + 1) % WATCH_CYCLE.length];
+
+  /* Optimistic UI update */
+  raw.watch_status = next;
+  btn.textContent  = WATCH_LABEL[next];
+  btn.className    = 'watch-btn' + (WATCH_CLASS[next] ? ' ' + WATCH_CLASS[next] : '');
+
+  try {
+    const res = await updateRow(tab, rowNum, { watch_status: next });
+    if (res && res.error) throw new Error(res.error);
+    const msg = next === 'watched' ? 'Marked as watched ✓'
+              : next === 'watching' ? 'Marked as watching ▶'
+              : 'Removed from watchlist';
+    toast(msg, 'success');
+  } catch (err) {
+    /* Roll back on failure */
+    raw.watch_status = cur;
+    btn.textContent  = WATCH_LABEL[cur];
+    btn.className    = 'watch-btn' + (WATCH_CLASS[cur] ? ' ' + WATCH_CLASS[cur] : '');
+    toast('Could not update watch status', 'error');
+  }
 }
 
 /* ════════════════════════════════════════════════════════════
