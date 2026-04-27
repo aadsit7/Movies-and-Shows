@@ -1556,6 +1556,45 @@
     .recommend-cta:active { transform: scale(.98); }
     .recommend-cta:disabled { opacity: .7; cursor: default; }
 
+    /* ── For You progress steps ──────────────────────────── */
+    .rec-progress {
+      margin: 0 4px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .rec-step {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--text-3);
+      transition: color .3s;
+    }
+    .rec-step.done  { color: var(--text-2); }
+    .rec-step.active { color: var(--text-1); font-weight: 600; }
+    .rec-step-icon {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      flex-shrink: 0;
+      transition: background .3s, border-color .3s;
+    }
+    .rec-step.done  .rec-step-icon { background: #d1fae5; border-color: #6ee7b7; }
+    .rec-step.active .rec-step-icon {
+      border-color: var(--accent);
+      animation: rec-pulse 1s ease-in-out infinite;
+    }
+    @keyframes rec-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,.4); }
+      50%       { box-shadow: 0 0 0 5px rgba(99,102,241,0); }
+    }
+
     .recommend-profile {
       margin: 4px 4px 14px;
       padding: 12px 14px;
@@ -1957,11 +1996,13 @@ const S = {
     results: [],
   },
   recommended: {
-    loading: false,
-    profile: '',           // 2-3 sentence taste fingerprint from Phase 1
-    results: [],           // [{ title, type, year, ... whyItFits, confidence }]
-    note:    '',           // optional note (e.g. "library too small")
-    error:   '',
+    loading:      false,
+    profile:      '',     // 2-3 sentence taste fingerprint from Phase 1
+    results:      [],     // [{ title, type, year, ... whyItFits, confidence }]
+    note:         '',     // optional note (e.g. "library too small")
+    error:        '',
+    progressStep: 0,      // index into REC_STEPS during loading
+    progressTimer: null,  // timer handle — cleared in finally block
   },
 };
 
@@ -1971,6 +2012,18 @@ const PROFILES = {
   popnana: { id: 'popnana', name: 'Pop Pop & Nana', icon: '⚾', dotClass: 'side-menu-profile-dot-popnana', avatarClass: 'settings-profile-avatar-popnana' },
 };
 const LS_PROFILE_KEY = 'fmtProfile';
+
+/* Step labels shown while For You recommendations are being fetched.
+   Each step advances on a timer so the user knows it's working. */
+const REC_STEPS = [
+  { icon: '📚', label: 'Reading your library…'           },
+  { icon: '🎯', label: 'Building your taste profile…'    },
+  { icon: '🔍', label: 'Searching for movies & shows…'   },
+  { icon: '🌐', label: 'Checking streaming availability…'},
+  { icon: '✨', label: 'Finalizing your picks…'          },
+];
+/* Approximate seconds each step takes before advancing (total ≈ 60 s) */
+const REC_STEP_DELAYS = [4000, 10000, 14000, 14000, Infinity];
 
 /* Filter S.allMovies/Shows/Livetv into S.movies/shows/livetv based on active profile */
 function applyProfileFilter() {
@@ -5171,11 +5224,11 @@ function renderRecommendedTab() {
   if (R.loading && hasResults) {
     // Refreshing with existing results — keep them visible, dim them, show progress above
     body = `
-      <div class="loading-row" style="margin-bottom:14px"><div class="spinner"></div>Searching the web for fresh picks…</div>
+      <div class="rec-progress" id="rec-progress-panel">${_renderRecProgress(R.progressStep)}</div>
       ${R.profile ? `<div class="recommend-profile"><span class="profile-label">Your taste fingerprint</span>${esc(R.profile)}</div>` : ''}
-      <div class="search-results-list" style="opacity:0.5;pointer-events:none">${renderRecommendedResults(R.results)}</div>`;
+      <div class="search-results-list" style="opacity:0.45;pointer-events:none">${renderRecommendedResults(R.results)}</div>`;
   } else if (R.loading) {
-    body = `<div class="loading-row"><div class="spinner"></div>Building your taste profile and searching the web…</div>`;
+    body = `<div class="rec-progress" id="rec-progress-panel">${_renderRecProgress(R.progressStep)}</div>`;
   } else if (R.error) {
     body = `<p style="color:var(--error);padding:16px 0;font-size:14px">${esc(R.error)}</p>`;
   } else if (hasResults) {
@@ -5262,6 +5315,36 @@ function renderRecommendedResults(results) {
   }).join('');
 }
 
+/* Advances the For You progress step indicator while the API call is in flight */
+function _startRecProgressTimer(R) {
+  R.progressStep = 0;
+  function advance(stepIdx) {
+    if (!R.loading || stepIdx >= REC_STEPS.length - 1) return;
+    const delay = REC_STEP_DELAYS[stepIdx];
+    if (delay === Infinity) return;
+    R.progressTimer = setTimeout(() => {
+      if (!R.loading) return;
+      R.progressStep = stepIdx + 1;
+      /* Live-update the progress panel without a full re-render */
+      const panel = document.getElementById('rec-progress-panel');
+      if (panel) panel.innerHTML = _renderRecProgress(R.progressStep);
+      advance(stepIdx + 1);
+    }, delay);
+  }
+  advance(0);
+}
+
+function _renderRecProgress(currentStep) {
+  return REC_STEPS.map((s, i) => {
+    const cls = i < currentStep ? 'done' : i === currentStep ? 'active' : '';
+    const icon = i < currentStep ? '✓' : s.icon;
+    return `<div class="rec-step ${cls}">
+      <div class="rec-step-icon">${icon}</div>
+      <span>${s.label}</span>
+    </div>`;
+  }).join('');
+}
+
 async function requestRecommendations() {
   const R = S.recommended;
   if (R.loading) return;
@@ -5269,6 +5352,8 @@ async function requestRecommendations() {
   R.error   = '';
   R.note    = '';
   renderRecommendedTab();
+  _startRecProgressTimer(R);
+  renderSideMenu(); // show nav loading badge immediately
 
   try {
     const raw = await apiPost(
@@ -5293,6 +5378,8 @@ async function requestRecommendations() {
     }
     R.error = msg;
   } finally {
+    clearTimeout(R.progressTimer);
+    R.progressTimer = null;
     R.loading = false;
     saveRecCache();
     renderSideMenu(); // clear nav loading badge
