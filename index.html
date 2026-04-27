@@ -2637,6 +2637,7 @@ function renderSubHeader(tab) {
 
   if (tab === 'shows') {
     const sf = S.showStatusFilter || 'all';
+    const showingShowsOnly = S.libraryType === 'shows';
     el.innerHTML = `
       <div class="sub-header-row">
         <div class="search-wrap">
@@ -2648,11 +2649,11 @@ function renderSubHeader(tab) {
           >
         </div>
       </div>
-      <div class="status-filter-row">
+      ${showingShowsOnly ? `<div class="status-filter-row">
         <button class="status-filter-btn${sf === 'all'       ? ' active' : ''}" onclick="setShowStatusFilter('all')">All</button>
         <button class="status-filter-btn${sf === 'returning' ? ' active' : ''}" onclick="setShowStatusFilter('returning')">Returning</button>
         <button class="status-filter-btn${sf === 'ended'     ? ' active' : ''}" onclick="setShowStatusFilter('ended')">Ended</button>
-      </div>`;
+      </div>` : ''}`;
     return;
   }
 
@@ -2750,6 +2751,7 @@ function currentPublicTab() {
 
 function setLibraryType(type) {
   S.libraryType = type;
+  if (type !== 'shows') S.showStatusFilter = 'all';
   renderSubHeader('shows');
   renderLibrary();
   closeSideMenu();
