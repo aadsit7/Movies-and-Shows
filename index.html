@@ -1999,6 +1999,7 @@ let searchIndex   = [];  // [{raw, tab, idx, titleLc, airsDate, haystack}]
 let _indexDirty   = true;
 let _filterTimer  = null;
 let _loadInFlight = null;   // deduplicates concurrent loadAllData() calls
+const MEM_CACHE_TTL = 60 * 1000; // 60 s in-memory TTL — RAM only, never persisted
 
 /* Library data is always fetched live from Google Sheets — no localStorage
    cache for content.  The only thing persisted is the selected profile
@@ -2876,9 +2877,17 @@ function buildErrorHtml(err) {
     </div>`;
 }
 
-/* loadAllData — always fetches live data from Google Sheets.
-   In-flight deduplication prevents duplicate concurrent requests. */
+/* loadAllData — fetches live data from Google Sheets.
+   • In-memory staleness guard (60 s, RAM only): skips the network call when
+     data was just fetched — prevents hammering Apps Script on rapid tab
+     switches while still keeping data effectively live.
+   • force:true bypasses the guard (used by ↻ and after any write). */
 function loadAllData({ force = false } = {}) {
+  /* Skip if data is fresh in memory (not persisted anywhere) */
+  if (!force && S.lastSynced && (Date.now() - S.lastSynced.getTime()) < MEM_CACHE_TTL) {
+    return Promise.resolve();
+  }
+
   /* Return the in-flight promise if one is already running */
   if (_loadInFlight) return _loadInFlight;
 
