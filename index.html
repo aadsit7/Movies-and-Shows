@@ -1690,6 +1690,53 @@
       color: var(--text-2);
       line-height: 1.5;
     }
+
+    /* ── For You: category selection grid ───────────────────── */
+    .rec-category-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      padding: 4px 0 8px;
+    }
+    .rec-category-card {
+      background: var(--card);
+      border: 1.5px solid var(--border);
+      border-radius: 14px;
+      padding: 14px 12px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      transition: border-color .15s, background .15s, transform .1s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .rec-category-card:active { transform: scale(.97); background: var(--card-alt); border-color: var(--accent); }
+    .rec-category-icon { font-size: 26px; line-height: 1; }
+    .rec-category-name { font-size: 13px; font-weight: 700; color: var(--text); line-height: 1.2; }
+    .rec-category-tagline { font-size: 11px; color: var(--text-2); line-height: 1.4; }
+    .rec-category-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 0 12px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+    .rec-category-back-btn {
+      background: none;
+      border: none;
+      color: var(--accent);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 4px 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .rec-category-selected-label {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+    }
     .why-fits .why-label {
       font-weight: 700;
       color: var(--text-1);
@@ -2066,13 +2113,19 @@ const S = {
     results: [],
   },
   recommended: {
+    // Phase 1 — category selection
+    loadingCategories: false,
+    categories:        null,   // null=not fetched, array=ready
+    categoryError:     '',
+    selectedCategory:  null,   // {id, name, emoji, tagline}
+    // Phase 2 — recommendations for selected category
     loading:      false,
-    profile:      '',     // 2-3 sentence taste fingerprint from Phase 1
-    results:      [],     // [{ title, type, year, ... whyItFits, confidence }]
-    note:         '',     // optional note (e.g. "library too small")
+    profile:      '',
+    results:      [],
+    note:         '',
     error:        '',
-    progressStep: 0,      // index into REC_STEPS during loading
-    progressTimer: null,  // timer handle — cleared in finally block
+    progressStep: 0,
+    progressTimer: null,
   },
 };
 
@@ -2085,15 +2138,21 @@ const LS_PROFILE_KEY = 'fmtProfile';
 
 /* Step labels shown while For You recommendations are being fetched.
    Each step advances on a timer so the user knows it's working. */
-const REC_STEPS = [
-  { icon: '📚', label: 'Reading your library…'           },
-  { icon: '🎯', label: 'Building your taste profile…'    },
-  { icon: '🔍', label: 'Searching for movies & shows…'   },
-  { icon: '🌐', label: 'Checking streaming availability…'},
-  { icon: '✨', label: 'Finalizing your picks…'          },
+/* Phase 1 — category loading (fast, no web search) */
+const CAT_STEPS = [
+  { icon: '📚', label: 'Reading your library…'        },
+  { icon: '🎯', label: 'Identifying your taste…'      },
+  { icon: '✨', label: 'Building category options…'   },
 ];
-/* Approximate seconds each step takes before advancing (total ≈ 60 s) */
-const REC_STEP_DELAYS = [4000, 10000, 14000, 14000, Infinity];
+const CAT_STEP_DELAYS = [1500, 2500, Infinity];
+
+/* Phase 2 — recommendations within selected category */
+const REC_STEPS = [
+  { icon: '🔍', label: 'Searching for matches…'            },
+  { icon: '🌐', label: 'Checking streaming availability…'  },
+  { icon: '✨', label: 'Selecting your best picks…'        },
+];
+const REC_STEP_DELAYS = [5000, 10000, Infinity];
 
 /* Filter S.allMovies/Shows/Livetv into S.movies/shows/livetv based on active profile */
 function applyProfileFilter() {
@@ -5336,52 +5395,101 @@ async function saveSearchResult(idx) {
 function renderRecommendedTab() {
   const panel = document.getElementById('tab-recommended');
   if (!panel) return;
-
   const R = S.recommended;
   const hasResults = R.results && R.results.length > 0;
-  const subLine = hasResults
-    ? 'Refresh your picks anytime — we read your library and search the web for thematically adjacent titles you haven\'t seen yet.'
-    : 'We\'ll read your library, build a taste profile, and search the web for two movies and two shows that match.';
-  const btnLabel = R.loading
-    ? 'Searching…'
-    : (hasResults ? '↻ Refresh picks' : '🔎 Search for things you might like');
 
-  let body = '';
-  if (R.loading && hasResults) {
-    // Refreshing with existing results — keep them visible, dim them, show progress above
-    body = `
-      <div class="rec-progress" id="rec-progress-panel">${_renderRecProgress(R.progressStep)}</div>
-      ${R.profile ? `<div class="recommend-profile"><span class="profile-label">Your taste fingerprint</span>${esc(R.profile)}</div>` : ''}
-      <div class="search-results-list" style="opacity:0.45;pointer-events:none">${renderRecommendedResults(R.results)}</div>`;
-  } else if (R.loading) {
-    body = `<div class="rec-progress" id="rec-progress-panel">${_renderRecProgress(R.progressStep)}</div>`;
-  } else if (R.error) {
-    body = `<p style="color:var(--error);padding:16px 0;font-size:14px">${esc(R.error)}</p>`;
-  } else if (hasResults) {
-    body = `
-      ${R.profile ? `
-        <div class="recommend-profile">
-          <span class="profile-label">Your taste fingerprint</span>
-          ${esc(R.profile)}
-        </div>` : ''}
-      <div class="search-results-list">
-        ${renderRecommendedResults(R.results)}
-      </div>`;
-  } else if (R.note) {
-    body = `<div class="search-empty"><div class="big-icon">📚</div><p>${esc(R.note)}</p></div>`;
+  /* ── State: loading categories (Phase 1) ── */
+  if (R.loadingCategories) {
+    panel.innerHTML = `
+      <div class="recommend-hero">
+        <div class="hero-icon">✨</div>
+        <div class="hero-title">Recommended for You</div>
+        <div class="hero-sub">Analyzing your library…</div>
+        <button class="recommend-cta" disabled>Thinking…</button>
+      </div>
+      <div class="rec-progress" id="rec-progress-panel">${_renderCatProgress(R.progressStep)}</div>`;
+    return;
   }
 
+  /* ── State: show category tiles (Phase 1 complete) ── */
+  if (R.categories && !R.selectedCategory && !R.loading) {
+    panel.innerHTML = `
+      <div class="recommend-hero">
+        <div class="hero-icon">✨</div>
+        <div class="hero-title">What are you in the mood for?</div>
+        <div class="hero-sub">Pick a category and we'll find your next watch.</div>
+      </div>
+      <div class="rec-category-grid">
+        ${R.categories.map((c, i) => `
+          <div class="rec-category-card" onclick="selectCategory(${i})">
+            <div class="rec-category-icon">${esc(c.emoji)}</div>
+            <div class="rec-category-name">${esc(c.name)}</div>
+            <div class="rec-category-tagline">${esc(c.tagline)}</div>
+          </div>`).join('')}
+      </div>
+      ${R.categoryError ? `<p style="color:var(--error);font-size:13px;padding:8px 0">${esc(R.categoryError)}</p>` : ''}`;
+    return;
+  }
+
+  /* ── State: loading recommendations (Phase 2) ── */
+  if (R.loading) {
+    const cat = R.selectedCategory;
+    panel.innerHTML = `
+      <div class="rec-category-header">
+        <button class="rec-category-back-btn" onclick="resetToCategories()">← Back</button>
+        <span class="rec-category-selected-label">${cat ? esc(cat.emoji) + ' ' + esc(cat.name) : ''}</span>
+      </div>
+      <div class="rec-progress" id="rec-progress-panel">${_renderRecProgress(R.progressStep)}</div>`;
+    return;
+  }
+
+  /* ── State: show results ── */
+  if (hasResults) {
+    const cat = R.selectedCategory;
+    panel.innerHTML = `
+      <div class="rec-category-header">
+        <button class="rec-category-back-btn" onclick="resetToCategories()">← Categories</button>
+        <span class="rec-category-selected-label">${cat ? esc(cat.emoji) + ' ' + esc(cat.name) : ''}</span>
+      </div>
+      ${R.profile ? `<div class="recommend-profile"><span class="profile-label">Your taste fingerprint</span>${esc(R.profile)}</div>` : ''}
+      <div class="search-results-list">${renderRecommendedResults(R.results)}</div>`;
+    return;
+  }
+
+  /* ── State: error on Phase 2 ── */
+  if (R.error && R.selectedCategory) {
+    const cat = R.selectedCategory;
+    panel.innerHTML = `
+      <div class="rec-category-header">
+        <button class="rec-category-back-btn" onclick="resetToCategories()">← Back</button>
+        <span class="rec-category-selected-label">${esc(cat.emoji)} ${esc(cat.name)}</span>
+      </div>
+      <p style="color:var(--error);padding:12px 0;font-size:14px">${esc(R.error)}</p>
+      <button class="recommend-cta" style="margin-top:8px" onclick="selectCategory(${R.categories ? R.categories.indexOf(cat) : 0})">Try again</button>`;
+    return;
+  }
+
+  /* ── State: note (library too small etc) ── */
+  if (R.note) {
+    panel.innerHTML = `
+      <div class="recommend-hero">
+        <div class="hero-icon">📚</div>
+        <div class="hero-title">Library too small</div>
+        <div class="hero-sub">${esc(R.note)}</div>
+      </div>`;
+    return;
+  }
+
+  /* ── State: initial / idle ── */
   panel.innerHTML = `
     <div class="recommend-hero">
       <div class="hero-icon">✨</div>
       <div class="hero-title">Recommended for You</div>
-      <div class="hero-sub">${esc(subLine)}</div>
-      <button class="recommend-cta" id="recommend-cta-btn"
-        onclick="requestRecommendations()" ${R.loading ? 'disabled' : ''}>
-        ${esc(btnLabel)}
+      <div class="hero-sub">We'll read your library and suggest 4 categories — then find your perfect next watch.</div>
+      <button class="recommend-cta" id="recommend-cta-btn" onclick="requestCategories()">
+        🔎 Search for things you might like
       </button>
-    </div>
-    <div id="recommended-body">${body}</div>`;
+    </div>`;
 }
 
 function renderRecommendedResults(results) {
@@ -5441,49 +5549,109 @@ function renderRecommendedResults(results) {
   }).join('');
 }
 
-/* Advances the For You progress step indicator while the API call is in flight */
-function _startRecProgressTimer(R) {
+/* ── Progress timers ──────────────────────────────────────── */
+function _makeProgressTimer(R, steps, delays, isLoading, renderFn) {
   R.progressStep = 0;
-  function advance(stepIdx) {
-    if (!R.loading || stepIdx >= REC_STEPS.length - 1) return;
-    const delay = REC_STEP_DELAYS[stepIdx];
-    if (delay === Infinity) return;
+  function advance(idx) {
+    if (!isLoading() || idx >= steps.length - 1) return;
+    if (delays[idx] === Infinity) return;
     R.progressTimer = setTimeout(() => {
-      if (!R.loading) return;
-      R.progressStep = stepIdx + 1;
-      /* Live-update the progress panel without a full re-render */
+      if (!isLoading()) return;
+      R.progressStep = idx + 1;
       const panel = document.getElementById('rec-progress-panel');
-      if (panel) panel.innerHTML = _renderRecProgress(R.progressStep);
-      advance(stepIdx + 1);
-    }, delay);
+      if (panel) panel.innerHTML = renderFn(R.progressStep);
+      advance(idx + 1);
+    }, delays[idx]);
   }
   advance(0);
 }
 
-function _renderRecProgress(currentStep) {
-  return REC_STEPS.map((s, i) => {
-    const cls = i < currentStep ? 'done' : i === currentStep ? 'active' : '';
-    const icon = i < currentStep ? '✓' : s.icon;
-    return `<div class="rec-step ${cls}">
-      <div class="rec-step-icon">${icon}</div>
-      <span>${s.label}</span>
-    </div>`;
+function _renderCatProgress(step) {
+  return CAT_STEPS.map((s, i) => {
+    const cls = i < step ? 'done' : i === step ? 'active' : '';
+    return `<div class="rec-step ${cls}"><div class="rec-step-icon">${i < step ? '✓' : s.icon}</div><span>${s.label}</span></div>`;
   }).join('');
+}
+
+function _renderRecProgress(step) {
+  return REC_STEPS.map((s, i) => {
+    const cls = i < step ? 'done' : i === step ? 'active' : '';
+    return `<div class="rec-step ${cls}"><div class="rec-step-icon">${i < step ? '✓' : s.icon}</div><span>${s.label}</span></div>`;
+  }).join('');
+}
+
+/* ── Phase 1: load categories ─────────────────────────────── */
+async function requestCategories() {
+  const R = S.recommended;
+  if (R.loadingCategories || R.loading) return;
+  R.loadingCategories = true;
+  R.categoryError = '';
+  R.categories = null;
+  R.selectedCategory = null;
+  R.results = [];
+  R.error = '';
+  R.note = '';
+  renderRecommendedTab();
+  _makeProgressTimer(R, CAT_STEPS, CAT_STEP_DELAYS, () => R.loadingCategories, _renderCatProgress);
+
+  try {
+    const raw = await apiPost(
+      { action: 'getCategories', profile: S.profile,
+        library: { movies: S.movies, shows: S.shows, livetv: S.livetv } },
+      { retries: 1, timeoutMs: 30000 }
+    );
+    if (raw?.error) throw new Error(raw.error);
+    R.categories = Array.isArray(raw?.categories) ? raw.categories : null;
+    if (!R.categories) throw new Error('Could not generate categories — try again.');
+  } catch (err) {
+    R.categoryError = err.message || 'Something went wrong — please try again.';
+    R.categories = null;
+  } finally {
+    clearTimeout(R.progressTimer);
+    R.progressTimer = null;
+    R.loadingCategories = false;
+    renderRecommendedTab();
+  }
+}
+
+/* ── Phase 2: user picks a category, fetch recommendations ── */
+function selectCategory(idx) {
+  const R = S.recommended;
+  if (!R.categories || !R.categories[idx]) return;
+  R.selectedCategory = R.categories[idx];
+  R.results = [];
+  R.error = '';
+  R.note = '';
+  requestRecommendations();
+}
+
+function resetToCategories() {
+  const R = S.recommended;
+  clearTimeout(R.progressTimer);
+  R.progressTimer = null;
+  R.loading = false;
+  R.selectedCategory = null;
+  R.results = [];
+  R.error = '';
+  R.note = '';
+  R.profile = '';
+  renderRecommendedTab();
 }
 
 async function requestRecommendations() {
   const R = S.recommended;
   if (R.loading) return;
   R.loading = true;
-  R.error   = '';
-  R.note    = '';
+  R.error = '';
+  R.note = '';
   renderRecommendedTab();
-  _startRecProgressTimer(R);
-  renderSideMenu(); // show nav loading badge immediately
+  _makeProgressTimer(R, REC_STEPS, REC_STEP_DELAYS, () => R.loading, _renderRecProgress);
+  renderSideMenu();
 
   try {
     const raw = await apiPost(
       { action: 'recommendForMe', profile: S.profile,
+        category: R.selectedCategory,
         library: { movies: S.movies, shows: S.shows, livetv: S.livetv } },
       { retries: 1, timeoutMs: 180000 }
     );
@@ -5491,29 +5659,22 @@ async function requestRecommendations() {
     R.profile = String(raw?.profile || '');
     R.results = Array.isArray(raw?.results) ? raw.results : [];
     R.note    = String(raw?.note || '');
-    if (!R.results.length && !R.note) {
-      R.note = 'No recommendations returned — try again in a moment.';
-    }
+    if (!R.results.length && !R.note) R.note = 'No recommendations returned — try again in a moment.';
   } catch (err) {
-    console.error('requestRecommendations:', err);
     let msg = err.message || 'please try again';
-    if (msg.toLowerCase().includes('usage limit') || msg.toLowerCase().includes('rate limit') || msg.toLowerCase().includes('quota')) {
+    if (msg.toLowerCase().includes('usage limit') || msg.toLowerCase().includes('rate limit') || msg.toLowerCase().includes('quota'))
       msg = 'Recommendations are temporarily unavailable — AI API usage limit reached.';
-    } else if (msg.toLowerCase().includes('api key')) {
+    else if (msg.toLowerCase().includes('api key'))
       msg = 'Recommendations unavailable — API key not configured in Apps Script settings.';
-    }
     R.error = msg;
   } finally {
     clearTimeout(R.progressTimer);
     R.progressTimer = null;
     R.loading = false;
     saveRecCache();
-    renderSideMenu(); // clear nav loading badge
-    if (S.tab === 'recommended') {
-      renderRecommendedTab();
-    } else if (R.results && R.results.length) {
-      toast('✨ Your picks are ready — tap For You to see them');
-    }
+    renderSideMenu();
+    if (S.tab === 'recommended') renderRecommendedTab();
+    else if (R.results?.length) toast('✨ Your picks are ready — tap For You to see them');
   }
 }
 

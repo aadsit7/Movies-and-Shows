@@ -390,6 +390,7 @@ function doPost(e) {
     if (action === 'deleteRow')         return respondJson(handleDeleteRow(body.sheetName, body.rowIndex));
     if (action === 'claudeSearch')      return respondJson(handleClaudeSearch(body.query, body.sheetName, body.clientDatetime));
     if (action === 'recommendForMe')    return respondJson(handleRecommendForMe(body));
+    if (action === 'getCategories')     return respondJson(handleGetCategories(body));
     if (action === 'dislike')           return respondJson(handleDislike(body.title, body.type));
     if (action === 'removeDuplicates')  return respondJson(removeDuplicatesFromSheet(body.sheetName));
     if (action === 'saveEpisodes')      return respondJson(handleSaveEpisodes(body.title, body.episodes));
@@ -1083,11 +1084,77 @@ function handleClaudeSearch(query, sheetName, clientDatetime) {
   return { success: true, data: mediaData };
 }
 
+/* ── Category generation (Phase 1 of For You flow) ───────────
+   Fast call — no web search, just library analysis with Haiku.
+   Returns 4 categories: comedy variant (always first) + 3 dynamic. */
+function handleGetCategories(body) {
+  var settings = getSettings();
+  if (!settingEnabled(settings, 'search_enabled')) return { error: 'Search is currently disabled.' };
+  var apiKey = getAnthropicKey();
+  if (!apiKey) return { error: 'Missing ANTHROPIC_API_KEY' };
+
+  var movies, shows;
+  var activeProfile = (body && body.profile) || '';
+  var providedLib   = body && body.library;
+  if (providedLib && Array.isArray(providedLib.movies)) {
+    movies = providedLib.movies; shows = providedLib.shows || [];
+  } else {
+    var media = readAllMedia(); movies = (media && media.movies) || []; shows = (media && media.shows) || [];
+  }
+  function isPopNana(item) { return (item && (item.profile || '')).toLowerCase() === 'popnana'; }
+  function isFavorited(item) { var f = String(item.favorites || '').toLowerCase().trim(); return f === 'yes' || f === '1' || f === 'true'; }
+  if (activeProfile === 'popnana') { movies = movies.filter(isPopNana); shows = shows.filter(isPopNana); }
+  else { movies = movies.filter(function(m) { return !isPopNana(m); }); shows = shows.filter(function(s) { return !isPopNana(s); }); }
+
+  function qd(item) {
+    var t = String(item.title || '').trim(); if (!t) return '';
+    var g = String(item.genre_primary || item.genre || '').trim();
+    var tone = String(item.tone || '').trim();
+    return t + (g ? ' [' + g + ']' : '') + (tone ? ' [' + tone + ']' : '');
+  }
+  var ml = movies.filter(function(m) { return !isFavorited(m); }).map(qd).filter(Boolean).slice(0, 50);
+  var sl = shows.filter(function(s)  { return !isFavorited(s); }).map(qd).filter(Boolean).slice(0, 50);
+
+  var fallback = { categories: [
+    { id: 'comedy',   name: 'Comedy',           emoji: '😂', tagline: 'Feel-good laughs and sharp wit'    },
+    { id: 'drama',    name: 'Drama',             emoji: '🎭', tagline: 'Rich characters, compelling stories' },
+    { id: 'thriller', name: 'Thriller',          emoji: '🔍', tagline: 'Edge-of-your-seat suspense'        },
+    { id: 'action',   name: 'Action & Adventure',emoji: '🎬', tagline: 'High stakes and fast-paced thrills' }
+  ]};
+
+  if (ml.length + sl.length < 2) return fallback;
+
+  var prompt =
+    'Analyze this entertainment library and return 4 recommendation category options.\n\n' +
+    'MOVIES: ' + (ml.length ? ml.join(' | ') : 'none') + '\n' +
+    'SHOWS: '  + (sl.length ? sl.join(' | ')  : 'none') + '\n\n' +
+    'Rules:\n' +
+    '1. Category 1 MUST be a comedy variant tailored to their taste (e.g. "Dark Comedies", "Dry Wit Comedies", "Mockumentaries", "Satirical Comedies", "Family Comedies").\n' +
+    '2. Categories 2-4: the 3 strongest specific genre/tone themes from their library. Be specific ("Gritty Crime Dramas" not "Drama").\n' +
+    '3. Tagline: 6-10 words describing what they will find.\n' +
+    '4. Pick fitting emojis.\n\n' +
+    'Return ONLY this JSON (no markdown, no extra text):\n' +
+    '{"categories":[{"id":"comedy","name":"...","emoji":"...","tagline":"..."},{"id":"cat2","name":"...","emoji":"...","tagline":"..."},{"id":"cat3","name":"...","emoji":"...","tagline":"..."},{"id":"cat4","name":"...","emoji":"...","tagline":"..."}]}';
+
+  var resp;
+  try {
+    resp = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      payload: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 400, messages: [{ role: 'user', content: prompt }] })
+    });
+  } catch (e) { return fallback; }
+
+  if (resp.getResponseCode() < 200 || resp.getResponseCode() >= 300) return fallback;
+  var ar; try { ar = JSON.parse(resp.getContentText()); } catch (_) { return fallback; }
+  var parsed = parseRecommendationJson(extractTextFromContent(ar.content));
+  if (!parsed || !Array.isArray(parsed.categories) || parsed.categories.length < 4) return fallback;
+  return { categories: parsed.categories.slice(0, 4) };
+}
+
 /* ── Personalized recommendations ─────────────────────────────
-   Reads the user's saved Movies + Shows, asks Claude to follow the
-   four-phase recommendation framework (build a taste profile, search the
-   web in three parallel passes, score, and return 2 movies + 2 shows),
-   then returns the parsed result for the front-end to render.
+   Phase 2: user has selected a category. Searches the web and
+   returns 6 picks (3 movies + 3 shows) within that category.
 
    Response shape:
      { profile: "<2-3 sentence taste fingerprint>",
@@ -1238,25 +1305,36 @@ function handleRecommendForMe(body) {
     String(today.getMonth() + 1).padStart(2, '0') + '-' +
     String(today.getDate()).padStart(2, '0');
 
+  /* Category selected by the user in Phase 1 */
+  var cat     = body && body.category;
+  var catName = cat ? String(cat.name || '') : '';
+  var catLine = catName
+    ? 'CATEGORY: The user chose "' + catName + '" — ' + String(cat.tagline || '') + '.\n' +
+      'ALL 6 picks MUST fit this category. Tailor search queries to this genre/tone.\n\n'
+    : '';
+  var searchGenre = catName || 'based on their taste';
+
   var prompt =
     'You are a personalized entertainment recommendation engine. Today is ' + todayStr + '.\n\n' +
+    catLine +
     'USER LIBRARY — do NOT recommend any of these:\n' +
     'MOVIES (' + movieList.length + '): ' + (movieList.length ? movieList.join(' | ') : 'none') + '\n' +
     'SHOWS (' + showList.length + '): '  + (showList.length  ? showList.join(' | ')  : 'none') + '\n' +
     'SPORTS/LIVE (' + liveList.length + '): ' + (liveList.length ? liveList.join(' | ') : 'none') + '\n' +
     'DISLIKED: ' + (dislikedTitles.length ? dislikedTitles.join(' | ') : 'none') + '\n\n' +
-    'TASK: Recommend exactly 3 movies and 3 TV shows the user has NOT seen.\n\n' +
+    'TASK: Recommend exactly 3 movies and 3 TV shows the user has NOT seen' +
+    (catName ? ', all within the "' + catName + '" category' : '') + '.\n\n' +
     'STEPS:\n' +
-    '1. Read the library and identify the user\'s taste: dominant genres, tones, and themes. ' +
-    'Titles marked [FAVORITE] matter most — use them as primary anchors.\n' +
-    '2. Use web_search (up to 4 searches) to find highly-rated matches currently available to stream. ' +
-    'Focus on quality over quantity — 2 searches for movies, 2 for shows. ' +
-    'Good query patterns: "best [genre] movies streaming ' + today.getFullYear() + ' site:justwatch.com OR site:letterboxd.com", ' +
-    '"if you liked [top favorite title] recommendations reddit".\n' +
+    '1. Read the library and identify the user\'s taste within the requested category. ' +
+    'Titles marked [FAVORITE] matter most — use them as anchors.\n' +
+    '2. Use web_search (up to 4 searches) to find highly-rated "' + searchGenre + '" titles currently available to stream. ' +
+    'Good query patterns: "best ' + searchGenre + ' movies streaming ' + today.getFullYear() + ' site:justwatch.com OR site:letterboxd.com", ' +
+    '"best ' + searchGenre + ' shows streaming ' + today.getFullYear() + ' reddit".\n' +
     '3. Pick the 6 strongest matches. Every pick must:\n' +
     '   - NOT be in the user\'s library\n' +
-    '   - Have a whyItFits that names 1-2 specific titles from their list\n' +
-    '   - Have a real IMDb score (search if unsure)\n\n' +
+    '   - Fit the "' + (catName || 'requested') + '" category\n' +
+    '   - Have a whyItFits citing 1-2 specific titles from their list\n' +
+    '   - Have a real IMDb score\n\n' +
     'Return ONLY this JSON — no markdown, no explanation:\n' +
     '{\n' +
     '  "profile": "<2-3 sentence taste summary>",\n' +
