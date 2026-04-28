@@ -18,8 +18,9 @@ var SCHEDULES_SHEET    = 'Schedules';
    Property name: ANTHROPIC_API_KEY
    The literal below is a fallback for local testing only; leave it empty in
    the deployed copy. */
-var ANTHROPIC_API_KEY = '';
-var ANTHROPIC_MODEL   = 'claude-opus-4-7';
+var ANTHROPIC_API_KEY      = '';
+var ANTHROPIC_MODEL        = 'claude-opus-4-7';
+var RECOMMENDATION_MODEL   = 'claude-sonnet-4-6';
 
 function getAnthropicKey() {
   var fromProps = '';
@@ -1231,100 +1232,42 @@ function handleRecommendForMe(body) {
     String(today.getDate()).padStart(2, '0');
 
   var prompt =
-    'You are a personalized entertainment recommendation agent. Today\'s date is ' + todayStr + '.\n\n' +
-    'The user\'s library is below — these are titles they have already watched and enjoyed. ' +
-    'Do NOT recommend anything from this list.\n\n' +
-    'MOVIES THE USER HAS SAVED (' + movieList.length + '):\n' +
-    (movieList.length ? '- ' + movieList.join('\n- ') : '(none)') + '\n\n' +
-    'TV SHOWS THE USER HAS SAVED (' + showList.length + '):\n' +
-    (showList.length ? '- ' + showList.join('\n- ') : '(none)') + '\n\n' +
-    'SPORTS & LIVE TV THE USER FOLLOWS (' + liveList.length + '):\n' +
-    (liveList.length ? '- ' + liveList.join('\n- ') : '(none)') + '\n\n' +
-    'TITLES THE USER HAS EXPLICITLY DISLIKED — do NOT recommend these under any circumstances:\n' +
-    (dislikedTitles.length ? '- ' + dislikedTitles.join('\n- ') : '(none)') + '\n\n' +
-    'Follow this four-phase framework strictly:\n\n' +
-    'PHASE 1 — BUILD THE TASTE PROFILE BEFORE SEARCHING\n' +
-    'Synthesize the lists above (do not search yet):\n' +
-    '  1. GENRES: which genres dominate?\n' +
-    '  2. TONES: which tones recur (slow-burn, satirical, emotionally heavy, witty, etc.)?\n' +
-    '  3. THEMES: which subject matter repeats (moral ambiguity, class tension, found family, unreliable narrator, crime procedural, etc.)?\n' +
-    '  4. ERA / FORMAT: prestige TV, indie film, blockbusters, foreign language, classics?\n' +
-    '  5. SPORTS & LIVE INTERESTS: factor in any teams or leagues from the SPORTS & LIVE TV list — these reveal regional loyalties and live-event preferences that should inform recommendations (sports documentaries, team-related content, broadcast live events).\n' +
-    '  6. AVOID SIGNALS: which genres/tones are completely absent? Treat these as soft avoids.\n' +
-    '  7. TASTE FINGERPRINT: write a 2-3 sentence summary you will score every candidate against.\n\n' +
-    'PHASE 2 — RUN THREE PARALLEL SEARCH PASSES (use the web_search tool, free public sources only)\n' +
-    '  PASS A — Streaming catalog: target JustWatch, Letterboxd, IMDb lists, Rotten Tomatoes. ' +
-    'Query like "[theme/genre from fingerprint] best movies/shows ' + today.getFullYear() + '" and ' +
-    '"hidden gem [genre] streaming". Goal: 10–15 candidates currently streamable.\n' +
-    '  PASS B — Social discovery: target Reddit (r/moviesuggestions, r/ifyoulikeblank, r/television), ' +
-    'Letterboxd lists, fan wikis. Query like "if you liked [top 2-3 titles from their list] recommendations" ' +
-    'and "fans of [title] also loved". Goal: 5–10 community-endorsed thematic adjacents.\n' +
-    '  PASS C — Live & broadcast: target TV Guide, Reelgood, network sites (NBC, HBO, PBS), sports schedules. ' +
-    'Query upcoming TV premieres and live events for ' + today.getFullYear() + '. Goal: 3–5 time-sensitive picks.\n\n' +
-    'PHASE 3 — SCORE AND RANK\n' +
-    'For every candidate, score against the taste fingerprint:\n' +
-    '  THEME MATCH (0–3) · TONE MATCH (0–2) · AVOID PENALTY (–2 if it leans on a genre/tone they\'ve clearly avoided) · ' +
-    'NOVELTY BONUS (+1 if underrepresented in their list) · RECENCY (+1 if released/airing in the last 18 months) · ' +
-    'LIVE URGENCY (mark Pass C titles airing within 7 days as URGENT).\n' +
-    'Discard anything below 3 points. Rank by score.\n\n' +
-    'PHASE 4 — OUTPUT\n' +
-    'Return EXACTLY 3 movies and 3 TV shows (6 total) — the highest-scoring picks across passes A and B. ' +
-    'Skip Pass C unless one of the six picks is naturally a live/limited-series premiere.\n\n' +
-    'ACCURACY RULES\n' +
-    '- Never fabricate availability. If you cannot confirm where a title streams, set streamingOn to "Check JustWatch".\n' +
-    '- Every "whyItFits" must reference 1–2 specific titles from the user\'s own list as comparison anchors.\n' +
-    '- Titles marked [FAVORITE] in the library are loved most — weight them 2× when building the taste fingerprint and use them as primary anchors in whyItFits.\n' +
-    '- Do not recommend any title already in the user\'s library (case-insensitive match on title).\n' +
-    '- Prefer specificity over volume.\n\n' +
-    'Return ONLY a single raw JSON object — no markdown fences, no explanation, no extra text — with this exact shape:\n' +
+    'You are a personalized entertainment recommendation engine. Today is ' + todayStr + '.\n\n' +
+    'USER LIBRARY — do NOT recommend any of these:\n' +
+    'MOVIES (' + movieList.length + '): ' + (movieList.length ? movieList.join(' | ') : 'none') + '\n' +
+    'SHOWS (' + showList.length + '): '  + (showList.length  ? showList.join(' | ')  : 'none') + '\n' +
+    'SPORTS/LIVE (' + liveList.length + '): ' + (liveList.length ? liveList.join(' | ') : 'none') + '\n' +
+    'DISLIKED: ' + (dislikedTitles.length ? dislikedTitles.join(' | ') : 'none') + '\n\n' +
+    'TASK: Recommend exactly 3 movies and 3 TV shows the user has NOT seen.\n\n' +
+    'STEPS:\n' +
+    '1. Read the library and identify the user\'s taste: dominant genres, tones, and themes. ' +
+    'Titles marked [FAVORITE] matter most — use them as primary anchors.\n' +
+    '2. Use web_search (up to 4 searches) to find highly-rated matches currently available to stream. ' +
+    'Focus on quality over quantity — 2 searches for movies, 2 for shows. ' +
+    'Good query patterns: "best [genre] movies streaming ' + today.getFullYear() + ' site:justwatch.com OR site:letterboxd.com", ' +
+    '"if you liked [top favorite title] recommendations reddit".\n' +
+    '3. Pick the 6 strongest matches. Every pick must:\n' +
+    '   - NOT be in the user\'s library\n' +
+    '   - Have a whyItFits that names 1-2 specific titles from their list\n' +
+    '   - Have a real IMDb score (search if unsure)\n\n' +
+    'Return ONLY this JSON — no markdown, no explanation:\n' +
     '{\n' +
-    '  "profile": "<2-3 sentence taste fingerprint>",\n' +
+    '  "profile": "<2-3 sentence taste summary>",\n' +
     '  "results": [\n' +
-    '    {\n' +
-    '      "type": "Movie",\n' +
-    '      "title": "",\n' +
-    '      "year": "<4-digit year>",\n' +
-    '      "genre": "<primary genre>",\n' +
-    '      "rating": "<MPAA rating>",\n' +
-    '      "description": "<1-2 sentence plot summary>",\n' +
-    '      "director": "",\n' +
-    '      "cast": "<comma-separated top 3>",\n' +
-    '      "streamingOn": "<platform or \'Check JustWatch\'>",\n' +
-    '      "imdbScore": "<e.g. 8.2>",\n' +
-    '      "tone": "<e.g. Drama, Thriller>",\n' +
-    '      "whyItFits": "<2-3 sentences citing specific titles from their list>",\n' +
-    '      "confidence": "High | Medium | Worth a shot"\n' +
-    '    },\n' +
-    '    { "type": "Movie", ... },\n' +
-    '    {\n' +
-    '      "type": "Show",\n' +
-    '      "title": "",\n' +
-    '      "year": "<year show started>",\n' +
-    '      "genre": "<primary genre>",\n' +
-    '      "rating": "<TV rating>",\n' +
-    '      "description": "<1-2 sentence premise>",\n' +
-    '      "network": "<broadcast network or streaming service>",\n' +
-    '      "seasons": "<number>",\n' +
-    '      "status": "<Returning | Ended | Cancelled | On Hiatus>",\n' +
-    '      "nextAirs": "<YYYY-MM-DD HH:MM TZ or descriptive, empty string if unknown>",\n' +
-    '      "cast": "<comma-separated top 3>",\n' +
-    '      "streamingOn": "<streaming platform or \'Check JustWatch\'>",\n' +
-    '      "imdbScore": "<e.g. 8.2>",\n' +
-    '      "tone": "<e.g. Drama, Thriller>",\n' +
-    '      "whyItFits": "<2-3 sentences citing specific titles from their list>",\n' +
-    '      "confidence": "High | Medium | Worth a shot"\n' +
-    '    },\n' +
-    '    { "type": "Show", ... },\n' +
-    '    { "type": "Show", ... }\n' +
+    '    {"type":"Movie","title":"","year":"","genre":"","rating":"","description":"","director":"","cast":"","streamingOn":"","imdbScore":"","tone":"","whyItFits":"","confidence":"High|Medium|Worth a shot"},\n' +
+    '    {"type":"Movie",...},\n' +
+    '    {"type":"Movie",...},\n' +
+    '    {"type":"Show","title":"","year":"","genre":"","rating":"","description":"","network":"","seasons":"","status":"","nextAirs":"","cast":"","streamingOn":"","imdbScore":"","tone":"","whyItFits":"","confidence":"High|Medium|Worth a shot"},\n' +
+    '    {"type":"Show",...},\n' +
+    '    {"type":"Show",...}\n' +
     '  ]\n' +
-    '}\n\n' +
-    'Order: 3 movies first, then 3 shows. Use empty string for any field you cannot confirm. ' +
-    'The "results" array MUST contain exactly 6 entries — 3 with type "Movie" and 3 with type "Show".';
+    '}\n' +
+    'Use "" for unknown fields. results MUST have exactly 6 items: 3 Movie then 3 Show.';
 
   var payload = {
-    model:      ANTHROPIC_MODEL,
-    max_tokens: 16000,
-    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 12 }],
+    model:      RECOMMENDATION_MODEL,
+    max_tokens: 4000,
+    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 4 }],
     messages: [{ role: 'user', content: prompt }]
   };
 
