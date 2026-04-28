@@ -20,7 +20,7 @@ var SCHEDULES_SHEET    = 'Schedules';
    the deployed copy. */
 var ANTHROPIC_API_KEY      = '';
 var ANTHROPIC_MODEL        = 'claude-opus-4-7';
-var RECOMMENDATION_MODEL   = 'claude-sonnet-4-6';
+var RECOMMENDATION_MODEL   = 'claude-haiku-4-5-20251001';
 
 function getAnthropicKey() {
   var fromProps = '';
@@ -1327,9 +1327,10 @@ function handleRecommendForMe(body) {
     'STEPS:\n' +
     '1. Read the library and identify the user\'s taste within the requested category. ' +
     'Titles marked [FAVORITE] matter most — use them as anchors.\n' +
-    '2. Use web_search (up to 4 searches) to find highly-rated "' + searchGenre + '" titles currently available to stream. ' +
-    'Good query patterns: "best ' + searchGenre + ' movies streaming ' + today.getFullYear() + ' site:justwatch.com OR site:letterboxd.com", ' +
-    '"best ' + searchGenre + ' shows streaming ' + today.getFullYear() + ' reddit".\n' +
+    '2. Use web_search (up to 2 searches) to find highly-rated "' + searchGenre + '" titles ' +
+    'currently available to stream. Good queries: ' +
+    '"best ' + searchGenre + ' movies streaming ' + today.getFullYear() + ' site:justwatch.com", ' +
+    '"best ' + searchGenre + ' shows reddit ' + today.getFullYear() + '".\n' +
     '3. Pick the 6 strongest matches. Every pick must:\n' +
     '   - NOT be in the user\'s library\n' +
     '   - Fit the "' + (catName || 'requested') + '" category\n' +
@@ -1351,9 +1352,9 @@ function handleRecommendForMe(body) {
 
   var payload = {
     model:      RECOMMENDATION_MODEL,
-    max_tokens: 4000,
-    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 4 }],
-    messages: [{ role: 'user', content: prompt }]
+    max_tokens: 3000,
+    tools:      [{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }],
+    messages:   [{ role: 'user', content: prompt }]
   };
 
   var fetchOptions = {

@@ -2175,11 +2175,10 @@ const CAT_STEP_DELAYS = [1500, 2500, Infinity];
 
 /* Phase 2 — recommendations within selected category */
 const REC_STEPS = [
-  { icon: '🔍', label: 'Searching for matches…'            },
-  { icon: '🌐', label: 'Checking streaming availability…'  },
-  { icon: '✨', label: 'Selecting your best picks…'        },
+  { icon: '🔍', label: 'Searching for matches…'      },
+  { icon: '✨', label: 'Selecting your best picks…'  },
 ];
-const REC_STEP_DELAYS = [5000, 10000, Infinity];
+const REC_STEP_DELAYS = [6000, Infinity];
 
 /* Filter S.allMovies/Shows/Livetv into S.movies/shows/livetv based on active profile */
 function applyProfileFilter() {
@@ -2241,8 +2240,50 @@ const MEM_CACHE_TTL = 60 * 1000; // 60 s in-memory TTL — RAM only, never persi
    (LS_PROFILE_KEY).  These stubs keep old call-sites from throwing. */
 function saveCache()       {}
 function restoreCache()    { return false; }
-function saveRecCache()    {}
-function restoreRecCache() { return false; }
+
+const LS_REC_KEY = 'fmtRecCache_v2';
+const REC_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function _libHash() {
+  const titles = (S.movies || []).concat(S.shows || [])
+    .map(m => String(m.title || '').toLowerCase()).sort().join('|');
+  let h = 0;
+  for (let i = 0; i < titles.length; i++) { h = (Math.imul(31, h) + titles.charCodeAt(i)) | 0; }
+  return h + '_' + S.profile;
+}
+
+function saveRecCache() {
+  try {
+    const R = S.recommended;
+    if (!R.categories || !R.results?.length) return;
+    localStorage.setItem(LS_REC_KEY, JSON.stringify({
+      ts: Date.now(),
+      libHash: _libHash(),
+      categories: R.categories,
+      selectedCategory: R.selectedCategory,
+      profile: R.profile,
+      results: R.results,
+      note: R.note
+    }));
+  } catch (_) {}
+}
+
+function restoreRecCache() {
+  try {
+    const raw = localStorage.getItem(LS_REC_KEY);
+    if (!raw) return false;
+    const c = JSON.parse(raw);
+    if (!c || Date.now() - c.ts > REC_CACHE_TTL_MS) return false;
+    if (c.libHash !== _libHash()) return false;
+    const R = S.recommended;
+    R.categories = c.categories || null;
+    R.selectedCategory = c.selectedCategory || null;
+    R.profile = c.profile || '';
+    R.results = c.results || [];
+    R.note    = c.note   || '';
+    return R.results.length > 0;
+  } catch (_) { return false; }
+}
 
 /* One-time cleanup: remove any stale cache keys left over from the old scheme */
 try {
@@ -2664,7 +2705,7 @@ function switchTab(publicTab) {
 
   if (tab === 'settings')    { renderSettings(); return; }
   if (tab === 'search')      { renderSearchTab(); return; }
-  if (tab === 'recommended') { renderRecommendedTab(); return; }
+  if (tab === 'recommended') { restoreRecCache(); renderRecommendedTab(); return; }
 
   if (tab === 'upcoming') {
     renderScheduleTab();
@@ -5586,7 +5627,7 @@ function _makeProgressTimer(R, steps, delays, isLoading, renderFn) {
       if (!isLoading()) return;
       R.progressStep = idx + 1;
       const panel = document.getElementById('rec-progress-panel');
-      if (panel) panel.outerHTML = `<div id="rec-progress-panel">${renderFn(R.progressStep)}</div>`;
+      if (panel) panel.innerHTML = renderFn(R.progressStep);
       advance(idx + 1);
     }, delays[idx]);
   }
