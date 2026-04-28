@@ -1397,20 +1397,28 @@ function handleRecommendForMe(body) {
 
 /* Pull the concatenated text out of an Anthropic content array. With the
    web_search tool, content can include server_tool_use and
-   web_search_tool_result blocks; we only want the model's final text. */
+   web_search_tool_result blocks; we only want the model's final text.
+   Returns the last text block first (most likely to be the final answer
+   after web searches), falling back to all blocks concatenated. */
 function extractTextFromContent(content) {
   if (!Array.isArray(content)) return '';
+  var last = '';
   var out = '';
   for (var i = 0; i < content.length; i++) {
     var block = content[i];
-    if (block && block.type === 'text' && block.text) out += block.text;
+    if (block && block.type === 'text' && block.text) {
+      out += block.text;
+      last = block.text;
+    }
   }
+  return last || out;
   return out;
 }
 
 /* Extract the outermost JSON object from a possibly-fenced text blob.
-   Uses balanced-bracket counting so trailing text after the closing }
-   (e.g. a model explanation) does not corrupt the extracted substring. */
+   Scans ALL { positions and returns the last valid JSON object found —
+   the model often produces explanation text (which may contain {) before
+   the final JSON answer, so taking the last valid object is most reliable. */
 function parseJsonFromText(text) {
   if (!text) return null;
   var stripped = String(text).replace(/```json\s*/gi, '').replace(/```/g, '').trim();
@@ -1418,25 +1426,34 @@ function parseJsonFromText(text) {
   /* Fast path: the whole string is already valid JSON */
   try { var direct = JSON.parse(stripped); if (direct && typeof direct === 'object') return direct; } catch (_) {}
 
-  /* Balanced-bracket scan to find the first complete {...} object */
-  var start = stripped.indexOf('{');
-  if (start === -1) return null;
-  var depth = 0, inStr = false, esc = false;
-  for (var i = start; i < stripped.length; i++) {
-    var c = stripped[i];
-    if (esc)            { esc = false; continue; }
-    if (c === '\\' && inStr) { esc = true;  continue; }
-    if (c === '"')      { inStr = !inStr; continue; }
-    if (inStr)          { continue; }
-    if (c === '{')      { depth++; }
-    else if (c === '}') {
-      depth--;
-      if (depth === 0) {
-        try { return JSON.parse(stripped.substring(start, i + 1)); } catch (_) { return null; }
+  /* Scan every { position; keep the last successfully parsed object */
+  var lastValid = null;
+  var pos = 0;
+  while (pos < stripped.length) {
+    var start = stripped.indexOf('{', pos);
+    if (start === -1) break;
+    var depth = 0, inStr = false, esc = false;
+    for (var i = start; i < stripped.length; i++) {
+      var c = stripped[i];
+      if (esc)            { esc = false; continue; }
+      if (c === '\\' && inStr) { esc = true;  continue; }
+      if (c === '"')      { inStr = !inStr; continue; }
+      if (inStr)          { continue; }
+      if (c === '{')      { depth++; }
+      else if (c === '}') {
+        depth--;
+        if (depth === 0) {
+          try {
+            var candidate = JSON.parse(stripped.substring(start, i + 1));
+            if (candidate && typeof candidate === 'object') lastValid = candidate;
+          } catch (_) {}
+          break;
+        }
       }
     }
+    pos = start + 1;
   }
-  return null;
+  return lastValid;
 }
 
 function inferContentKind(sheetName) {
