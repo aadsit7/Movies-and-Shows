@@ -1215,10 +1215,17 @@ function handleRecommendForMe(body) {
     return parts.join(' ');
   }
 
-  var movieList = movies.map(digest).filter(Boolean).slice(0, 80);
-  var showList  = shows.map(digest).filter(Boolean).slice(0, 80);
+  /* Favorites tab = content still being watched / undecided — exclude from
+     taste profiling but keep in excludedTitles so they aren't recommended. */
+  function isFavorited(item) {
+    var fav = String(item.favorites || '').toLowerCase().trim();
+    return fav === 'yes' || fav === '1' || fav === 'true';
+  }
 
-  /* Excluded titles — library content + anything the user explicitly disliked. */
+  var movieList = movies.filter(function(m) { return !isFavorited(m); }).map(digest).filter(Boolean).slice(0, 80);
+  var showList  = shows.filter(function(s)  { return !isFavorited(s); }).map(digest).filter(Boolean).slice(0, 80);
+
+  /* Excluded titles — full library (including favorites) + anything disliked. */
   var dislikedTitles = readDislikedTitles();
   var excludedTitles = []
     .concat(movies.map(function(m) { return String(m.title || '').toLowerCase().trim(); }))
