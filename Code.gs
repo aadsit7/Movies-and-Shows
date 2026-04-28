@@ -20,7 +20,7 @@ var SCHEDULES_SHEET    = 'Schedules';
    the deployed copy. */
 var ANTHROPIC_API_KEY      = '';
 var ANTHROPIC_MODEL        = 'claude-opus-4-7';
-var RECOMMENDATION_MODEL   = 'claude-sonnet-4-6';
+var RECOMMENDATION_MODEL   = 'claude-haiku-4-5-20251001';
 
 function getAnthropicKey() {
   var fromProps = '';
@@ -1327,14 +1327,15 @@ function handleRecommendForMe(body) {
     'STEPS:\n' +
     '1. Read the library and identify the user\'s taste within the requested category. ' +
     'Titles marked [FAVORITE] matter most — use them as anchors.\n' +
-    '2. From your training knowledge, identify highly-rated "' + searchGenre + '" titles ' +
-    'the user would enjoy and has NOT seen. Prefer well-known, critically acclaimed picks ' +
-    'with strong IMDb scores (7.0+).\n' +
+    '2. Use web_search (up to 2 searches) to find highly-rated "' + searchGenre + '" titles ' +
+    'currently available to stream. Good queries: ' +
+    '"best ' + searchGenre + ' movies streaming ' + today.getFullYear() + ' site:justwatch.com", ' +
+    '"best ' + searchGenre + ' shows reddit ' + today.getFullYear() + '".\n' +
     '3. Pick the 6 strongest matches. Every pick must:\n' +
     '   - NOT be in the user\'s library\n' +
     '   - Fit the "' + (catName || 'requested') + '" category\n' +
     '   - Have a whyItFits citing 1-2 specific titles from their list\n' +
-    '   - Have a real IMDb score from your knowledge\n\n' +
+    '   - Have a real IMDb score\n\n' +
     'Return ONLY this JSON — no markdown, no explanation:\n' +
     '{\n' +
     '  "profile": "<2-3 sentence taste summary>",\n' +
@@ -1347,12 +1348,12 @@ function handleRecommendForMe(body) {
     '    {"type":"Show",...}\n' +
     '  ]\n' +
     '}\n' +
-    'Use "" for unknown fields. results MUST have exactly 6 items: 3 Movie then 3 Show.\n' +
-    'For streamingOn: use your training knowledge. If unsure, write "Check JustWatch".';
+    'Use "" for unknown fields. results MUST have exactly 6 items: 3 Movie then 3 Show.';
 
   var payload = {
     model:      RECOMMENDATION_MODEL,
     max_tokens: 3000,
+    tools:      [{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }],
     messages:   [{ role: 'user', content: prompt }]
   };
 
