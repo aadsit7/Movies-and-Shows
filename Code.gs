@@ -1374,7 +1374,7 @@ function handleRecommendForMe(body) {
   var text = extractTextFromContent(apiResult.content);
   if (!text) return { error: 'Empty response from Claude' };
 
-  var parsed = parseJsonFromText(text);
+  var parsed = parseRecommendationJson(text);
   if (!parsed || !Array.isArray(parsed.results)) {
     return { error: 'Could not parse recommendations from response', raw: text.substring(0, 400) };
   }
@@ -1397,37 +1397,22 @@ function handleRecommendForMe(body) {
 
 /* Pull the concatenated text out of an Anthropic content array. With the
    web_search tool, content can include server_tool_use and
-   web_search_tool_result blocks; we only want the model's final text.
-   Returns the last text block first (most likely to be the final answer
-   after web searches), falling back to all blocks concatenated. */
+   web_search_tool_result blocks; we only want the model's text blocks. */
 function extractTextFromContent(content) {
   if (!Array.isArray(content)) return '';
-  var last = '';
   var out = '';
   for (var i = 0; i < content.length; i++) {
     var block = content[i];
-    if (block && block.type === 'text' && block.text) {
-      out += block.text;
-      last = block.text;
-    }
+    if (block && block.type === 'text' && block.text) out += block.text;
   }
-  return last || out;
   return out;
 }
 
-/* Extract the outermost JSON object from a possibly-fenced text blob.
-   Scans ALL { positions and returns the last valid JSON object found —
-   the model often produces explanation text (which may contain {) before
-   the final JSON answer, so taking the last valid object is most reliable. */
-function parseJsonFromText(text) {
-  if (!text) return null;
-  var stripped = String(text).replace(/```json\s*/gi, '').replace(/```/g, '').trim();
-
-  /* Fast path: the whole string is already valid JSON */
-  try { var direct = JSON.parse(stripped); if (direct && typeof direct === 'object') return direct; } catch (_) {}
-
-  /* Scan every { position; keep the last successfully parsed object */
-  var lastValid = null;
+/* Shared bracket-scan helper — collects every valid top-level JSON object
+   found in `stripped`. Returns an array of {obj, len} so callers can pick
+   the right one by shape or size. */
+function _scanJsonCandidates(stripped) {
+  var results = [];
   var pos = 0;
   while (pos < stripped.length) {
     var start = stripped.indexOf('{', pos);
@@ -1435,17 +1420,18 @@ function parseJsonFromText(text) {
     var depth = 0, inStr = false, esc = false;
     for (var i = start; i < stripped.length; i++) {
       var c = stripped[i];
-      if (esc)            { esc = false; continue; }
-      if (c === '\\' && inStr) { esc = true;  continue; }
-      if (c === '"')      { inStr = !inStr; continue; }
-      if (inStr)          { continue; }
-      if (c === '{')      { depth++; }
-      else if (c === '}') {
+      if (esc)             { esc = false; continue; }
+      if (c === '\\' && inStr) { esc = true; continue; }
+      if (c === '"')       { inStr = !inStr; continue; }
+      if (inStr)           { continue; }
+      if (c === '{')       { depth++; }
+      else if (c === '}')  {
         depth--;
         if (depth === 0) {
+          var substr = stripped.substring(start, i + 1);
           try {
-            var candidate = JSON.parse(stripped.substring(start, i + 1));
-            if (candidate && typeof candidate === 'object') lastValid = candidate;
+            var obj = JSON.parse(substr);
+            if (obj && typeof obj === 'object') results.push({ obj: obj, len: substr.length });
           } catch (_) {}
           break;
         }
@@ -1453,7 +1439,36 @@ function parseJsonFromText(text) {
     }
     pos = start + 1;
   }
-  return lastValid;
+  return results;
+}
+
+/* General-purpose JSON extractor used by the media search handler.
+   Returns the largest valid JSON object found in the text (most likely
+   the complete single-item response from Claude). */
+function parseJsonFromText(text) {
+  if (!text) return null;
+  var stripped = String(text).replace(/```json\s*/gi, '').replace(/```/g, '').trim();
+  try { var d = JSON.parse(stripped); if (d && typeof d === 'object') return d; } catch (_) {}
+  var candidates = _scanJsonCandidates(stripped);
+  if (!candidates.length) return null;
+  candidates.sort(function(a, b) { return b.len - a.len; });
+  return candidates[0].obj;
+}
+
+/* Recommendations-specific extractor. Prefers the first candidate that
+   has a "results" array (exactly the shape we ask Claude to return),
+   falling back to the largest object so we never silently drop the data. */
+function parseRecommendationJson(text) {
+  if (!text) return null;
+  var stripped = String(text).replace(/```json\s*/gi, '').replace(/```/g, '').trim();
+  try { var d = JSON.parse(stripped); if (d && typeof d === 'object') return d; } catch (_) {}
+  var candidates = _scanJsonCandidates(stripped);
+  if (!candidates.length) return null;
+  for (var i = 0; i < candidates.length; i++) {
+    if (Array.isArray(candidates[i].obj.results)) return candidates[i].obj;
+  }
+  candidates.sort(function(a, b) { return b.len - a.len; });
+  return candidates[0].obj;
 }
 
 function inferContentKind(sheetName) {
