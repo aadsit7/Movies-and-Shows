@@ -1737,6 +1737,33 @@
       font-weight: 700;
       color: var(--text);
     }
+    /* ── Loading progress bar ───────────────────────────────── */
+    .rec-loading-wrap {
+      padding: 20px 0 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .rec-progress-bar-track {
+      width: 100%;
+      height: 6px;
+      background: var(--border);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .rec-progress-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent), #B47CFF);
+      transition: width 0.6s ease;
+    }
+    .rec-progress-label {
+      font-size: 13px;
+      color: var(--text-2);
+      text-align: center;
+      font-weight: 500;
+      min-height: 18px;
+    }
     .why-fits .why-label {
       font-weight: 700;
       color: var(--text-1);
@@ -5405,9 +5432,9 @@ function renderRecommendedTab() {
         <div class="hero-icon">✨</div>
         <div class="hero-title">Recommended for You</div>
         <div class="hero-sub">Analyzing your library…</div>
-        <button class="recommend-cta" disabled>Thinking…</button>
+        <button class="recommend-cta" disabled>Analyzing…</button>
       </div>
-      <div class="rec-progress" id="rec-progress-panel">${_renderCatProgress(R.progressStep)}</div>`;
+      <div id="rec-progress-panel">${_renderCatProgress(R.progressStep)}</div>`;
     return;
   }
 
@@ -5439,7 +5466,7 @@ function renderRecommendedTab() {
         <button class="rec-category-back-btn" onclick="resetToCategories()">← Back</button>
         <span class="rec-category-selected-label">${cat ? esc(cat.emoji) + ' ' + esc(cat.name) : ''}</span>
       </div>
-      <div class="rec-progress" id="rec-progress-panel">${_renderRecProgress(R.progressStep)}</div>`;
+      <div id="rec-progress-panel">${_renderRecProgress(R.progressStep)}</div>`;
     return;
   }
 
@@ -5559,26 +5586,33 @@ function _makeProgressTimer(R, steps, delays, isLoading, renderFn) {
       if (!isLoading()) return;
       R.progressStep = idx + 1;
       const panel = document.getElementById('rec-progress-panel');
-      if (panel) panel.innerHTML = renderFn(R.progressStep);
+      if (panel) panel.outerHTML = `<div id="rec-progress-panel">${renderFn(R.progressStep)}</div>`;
       advance(idx + 1);
     }, delays[idx]);
   }
   advance(0);
 }
 
-function _renderCatProgress(step) {
-  return CAT_STEPS.map((s, i) => {
-    const cls = i < step ? 'done' : i === step ? 'active' : '';
-    return `<div class="rec-step ${cls}"><div class="rec-step-icon">${i < step ? '✓' : s.icon}</div><span>${s.label}</span></div>`;
-  }).join('');
+function _renderProgressBlock(steps, step) {
+  const pct = Math.round(((step + 0.6) / steps.length) * 100);
+  const label = steps[Math.min(step, steps.length - 1)].label;
+  return `
+    <div class="rec-loading-wrap">
+      <div class="rec-progress-bar-track">
+        <div class="rec-progress-bar-fill" style="width:${pct}%"></div>
+      </div>
+      <div class="rec-progress-label">${label}</div>
+      <div class="rec-progress">
+        ${steps.map((s, i) => {
+          const cls = i < step ? 'done' : i === step ? 'active' : '';
+          return `<div class="rec-step ${cls}"><div class="rec-step-icon">${i < step ? '✓' : s.icon}</div><span>${s.label}</span></div>`;
+        }).join('')}
+      </div>
+    </div>`;
 }
 
-function _renderRecProgress(step) {
-  return REC_STEPS.map((s, i) => {
-    const cls = i < step ? 'done' : i === step ? 'active' : '';
-    return `<div class="rec-step ${cls}"><div class="rec-step-icon">${i < step ? '✓' : s.icon}</div><span>${s.label}</span></div>`;
-  }).join('');
-}
+function _renderCatProgress(step) { return _renderProgressBlock(CAT_STEPS, step); }
+function _renderRecProgress(step) { return _renderProgressBlock(REC_STEPS, step); }
 
 /* ── Phase 1: load categories ─────────────────────────────── */
 async function requestCategories() {
