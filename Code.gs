@@ -1327,14 +1327,14 @@ function handleRecommendForMe(body) {
     'STEPS:\n' +
     '1. Read the library and identify the user\'s taste within the requested category. ' +
     'Titles marked [FAVORITE] matter most — use them as anchors.\n' +
-    '2. Use web_search (up to 4 searches) to find highly-rated "' + searchGenre + '" titles currently available to stream. ' +
-    'Good query patterns: "best ' + searchGenre + ' movies streaming ' + today.getFullYear() + ' site:justwatch.com OR site:letterboxd.com", ' +
-    '"best ' + searchGenre + ' shows streaming ' + today.getFullYear() + ' reddit".\n' +
+    '2. From your training knowledge, identify highly-rated "' + searchGenre + '" titles ' +
+    'the user would enjoy and has NOT seen. Prefer well-known, critically acclaimed picks ' +
+    'with strong IMDb scores (7.0+).\n' +
     '3. Pick the 6 strongest matches. Every pick must:\n' +
     '   - NOT be in the user\'s library\n' +
     '   - Fit the "' + (catName || 'requested') + '" category\n' +
     '   - Have a whyItFits citing 1-2 specific titles from their list\n' +
-    '   - Have a real IMDb score\n\n' +
+    '   - Have a real IMDb score from your knowledge\n\n' +
     'Return ONLY this JSON — no markdown, no explanation:\n' +
     '{\n' +
     '  "profile": "<2-3 sentence taste summary>",\n' +
@@ -1347,13 +1347,13 @@ function handleRecommendForMe(body) {
     '    {"type":"Show",...}\n' +
     '  ]\n' +
     '}\n' +
-    'Use "" for unknown fields. results MUST have exactly 6 items: 3 Movie then 3 Show.';
+    'Use "" for unknown fields. results MUST have exactly 6 items: 3 Movie then 3 Show.\n' +
+    'For streamingOn: use your training knowledge. If unsure, write "Check JustWatch".';
 
   var payload = {
     model:      RECOMMENDATION_MODEL,
-    max_tokens: 4000,
-    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 4 }],
-    messages: [{ role: 'user', content: prompt }]
+    max_tokens: 3000,
+    messages:   [{ role: 'user', content: prompt }]
   };
 
   var fetchOptions = {
