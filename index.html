@@ -446,11 +446,11 @@
     .cards-grid {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 6px;
     }
 
     /* ── Upcoming rail ────────────────────────────────────── */
-    .upcoming-section { margin-bottom: 14px; }
+    .upcoming-section { margin-bottom: 10px; }
     .upcoming-section:empty { display: none; }
     .upcoming-heading {
       display: flex;
@@ -462,7 +462,7 @@
       text-transform: uppercase;
       letter-spacing: .8px;
       color: var(--text-2);
-      margin: 4px 2px 8px;
+      margin: 3px 2px 6px;
     }
     .upcoming-heading-title {
       display: flex;
@@ -479,29 +479,29 @@
     }
     .upcoming-rail {
       display: flex;
-      gap: 10px;
+      gap: 8px;
       overflow-x: auto;
       -webkit-overflow-scrolling: touch;
       scroll-snap-type: x mandatory;
-      padding: 2px 14px 8px;
+      padding: 2px 14px 6px;
       margin: 0 -14px;
       scrollbar-width: none;
     }
     .upcoming-rail::-webkit-scrollbar { display: none; }
     .upcoming-card {
-      flex: 0 0 178px;
+      flex: 0 0 162px;
       scroll-snap-align: start;
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 10px 11px;
+      border-radius: 10px;
+      padding: 8px 10px;
       cursor: pointer;
       display: flex;
       flex-direction: column;
-      gap: 5px;
+      gap: 4px;
       transition: transform .15s, border-color .15s;
       animation: fadeUp .3s ease both;
-      min-height: 108px;
+      min-height: 90px;
       box-shadow: 0 1px 2px rgba(0,0,0,.04);
     }
     .upcoming-card:active { transform: scale(.98); }
@@ -821,15 +821,15 @@
     .media-card {
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 12px 14px 42px;  /* bottom pad makes room for the watch-status button */
+      border-radius: 12px;
+      padding: 9px 12px 38px;  /* bottom pad makes room for the watch-status button */
       position: relative;
       animation: fadeUp .25s ease both;
       overflow: hidden;
       box-shadow: 0 1px 2px rgba(0,0,0,.04);
       /* skip rendering off-screen cards for buttery scrolling on long lists */
       content-visibility: auto;
-      contain-intrinsic-size: 1px 130px;
+      contain-intrinsic-size: 1px 110px;
     }
     /* subtle accent stripe on the left edge — far less visually heavy than the
        previous 4px solid border, but still keeps a clear brand cue */
@@ -852,20 +852,20 @@
     }
 
     .card-title {
-      font-size: 16px;
+      font-size: 14px;
       font-weight: 600;
       color: var(--text);
       line-height: 1.3;
       letter-spacing: -.25px;
       padding-right: 116px; /* room for favorite + delete + refresh corner buttons */
-      margin-bottom: 4px;
+      margin-bottom: 3px;
     }
     .card-meta {
       display: flex;
       flex-wrap: nowrap;
       gap: 5px;
       align-items: center;
-      margin-bottom: 6px;
+      margin-bottom: 4px;
       color: var(--text-2);
       font-size: 12px;
       line-height: 1.3;
@@ -886,9 +886,9 @@
     .badges-row {
       display: flex;
       flex-wrap: wrap;
-      gap: 5px;
+      gap: 4px;
       align-items: center;
-      margin-bottom: 6px;
+      margin-bottom: 4px;
     }
     .platform-badge {
       padding: 3px 9px;
@@ -928,8 +928,8 @@
       background: rgba(0,191,255,.06);
       border-left: 2px solid var(--accent);
       border-radius: 0 8px 8px 0;
-      padding: 5px 9px;
-      margin: 6px 0 4px;
+      padding: 4px 8px;
+      margin: 4px 0 3px;
     }
     .ep-label {
       font-size: 9px;
@@ -945,7 +945,7 @@
     .info-line {
       font-size: 11px;
       color: var(--text-2);
-      margin-top: 3px;
+      margin-top: 2px;
       display: flex;
       gap: 5px;
       align-items: baseline;
@@ -1572,16 +1572,16 @@
       outline: none;
     }
     .search-input-row input:focus { border-color: var(--accent); }
-    .search-results-list { padding: 12px 16px 32px; }
+    .search-results-list { padding: 8px 14px 28px; }
     .search-result-card {
-      background: var(--surface); border-radius: 14px; padding: 14px;
-      margin-bottom: 12px; border: 1px solid var(--border);
+      background: var(--surface); border-radius: 12px; padding: 10px 12px;
+      margin-bottom: 8px; border: 1px solid var(--border);
     }
     .search-result-card .result-title {
-      font-size: 16px; font-weight: 700; margin-bottom: 4px;
+      font-size: 14px; font-weight: 700; margin-bottom: 3px;
     }
     .search-result-card .result-meta {
-      font-size: 12px; color: var(--text-2); margin-bottom: 6px; display: flex; gap: 6px; flex-wrap: wrap;
+      font-size: 12px; color: var(--text-2); margin-bottom: 4px; display: flex; gap: 6px; flex-wrap: wrap;
     }
     .source-tag {
       font-size: 11px; color: var(--text-3); background: var(--bg);
@@ -1594,21 +1594,21 @@
 
     /* ── Recommended (For You) tab ───────────────────────────── */
     .recommend-hero {
-      margin: 18px 4px 16px;
-      padding: 22px 18px;
-      border-radius: 16px;
+      margin: 12px 4px 12px;
+      padding: 14px 16px;
+      border-radius: 14px;
       background: linear-gradient(135deg, #6E6CF5 0%, #B47CFF 60%, #FF8AB4 100%);
       color: #fff;
       text-align: center;
       box-shadow: 0 8px 22px rgba(110, 108, 245, .25);
     }
-    .recommend-hero .hero-icon { font-size: 40px; line-height: 1; margin-bottom: 8px; }
+    .recommend-hero .hero-icon { font-size: 32px; line-height: 1; margin-bottom: 5px; }
     .recommend-hero .hero-title {
-      font-size: 16px; font-weight: 700; letter-spacing: .2px;
-      margin-bottom: 4px;
+      font-size: 15px; font-weight: 700; letter-spacing: .2px;
+      margin-bottom: 3px;
     }
     .recommend-hero .hero-sub {
-      font-size: 13px; opacity: .92; margin-bottom: 14px; line-height: 1.45;
+      font-size: 12px; opacity: .92; margin-bottom: 10px; line-height: 1.45;
     }
     .recommend-cta {
       display: inline-flex; align-items: center; gap: 8px;
@@ -1624,10 +1624,10 @@
 
     /* ── For You progress steps ──────────────────────────── */
     .rec-progress {
-      margin: 0 4px 18px;
+      margin: 0 4px 12px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 7px;
     }
     .rec-step {
       display: flex;
@@ -1662,9 +1662,9 @@
     }
 
     .recommend-profile {
-      margin: 4px 4px 14px;
-      padding: 12px 14px;
-      border-radius: 12px;
+      margin: 4px 4px 10px;
+      padding: 9px 12px;
+      border-radius: 10px;
       background: var(--card);
       border: 1px solid var(--border);
       font-size: 13px;
