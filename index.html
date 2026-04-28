@@ -5627,7 +5627,7 @@ function _makeProgressTimer(R, steps, delays, isLoading, renderFn) {
       if (!isLoading()) return;
       R.progressStep = idx + 1;
       const panel = document.getElementById('rec-progress-panel');
-      if (panel) panel.outerHTML = `<div id="rec-progress-panel">${renderFn(R.progressStep)}</div>`;
+      if (panel) panel.innerHTML = renderFn(R.progressStep);
       advance(idx + 1);
     }, delays[idx]);
   }
